@@ -2,10 +2,7 @@
 
 A high-performance, 16-bit arcade flight simulator built with **Vanilla JavaScript** and **HTML5 Canvas**. Navigate through the treacherous Nether, collect ancient debris (scraps), and use shiny gold nuggets to phase through walls while competing on a dynamic global leaderboard.
 
----
-
-## 📸 Preview
-![GhastRider Gameplay](ghastRiderGameplay.png)
+![GhastRider Gameplay](ghastrider-gameplay-ss.png)
 
 ---
 
