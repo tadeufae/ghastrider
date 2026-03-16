@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Theo's Nether Flight</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        /* Prevent all selection and context menus for immersive mobile play */
+        * {
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            outline: none;
+        }
+
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #0a0101;
+            font-family: 'Press Start 2P', cursive;
+            touch-action: none;
+            position: fixed;
+        }
+
+        #game-container {
+            position: relative; width: 100vw; height: 100vh;
+            overflow: hidden;
+        }
+
+        canvas { 
+            display: block; 
+            image-rendering: pixelated;
+            touch-action: none;
+        }
+
+        .ui-panel {
+            position: absolute; inset: 0; z-index: 100;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(4px);
+        }
+
+        .box {
+            background: #1a0505; border: 4px solid #3d1a28;
+            padding: 20px; text-align: center; color: white;
+            width: 90%; max-width: 360px;
+            pointer-events: auto;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        h1 { color: #ff4d4d; font-size: 14px; margin-bottom: 15px; line-height: 1.5; text-shadow: 2px 2px 0 #000; }
+        h2 { color: #ffd700; font-size: 10px; margin: 15px 0 10px; }
+
+        .btn {
+            background: #e63946; border: none; border-bottom: 4px solid #9d1b24;
+            color: white; padding: 12px 0; font-family: 'Press Start 2P', cursive;
+            font-size: 10px; cursor: pointer; width: 100%; display: block;
+            margin-top: 10px;
+        }
+
+        /* Taller button for easier mobile tapping */
+        .btn.tall { padding: 22px 0; font-size: 11px; }
+        .btn.secondary { background: #4b3621; border-bottom: 4px solid #2b1d14; }
+        .btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+
+        .char-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .char-card { border: 2px solid #3d1a28; padding: 10px; cursor: pointer; background: #000; transition: border-color 0.2s; }
+        .char-card.selected { border-color: #ffd700; background: #2b0707; }
+        .char-label { font-size: 8px; margin-top: 5px; color: #fff; }
+
+        .leaderboard {
+            text-align: left; font-size: 7px; background: #000; padding: 10px;
+            border: 2px solid #3d1a28; margin-top: 10px; line-height: 1.6;
+        }
+        .leaderboard-row { display: flex; justify-content: space-between; margin-bottom: 4px; color: #aaa; }
+        .leaderboard-row.header { color: #ff4d4d; border-bottom: 1px solid #333; padding-bottom: 4px; margin-bottom: 8px; }
+        .leaderboard-row.highlight { color: #ffd700; }
+
+        #hud {
+            position: absolute; top: env(safe-area-inset-top, 15px); left: 15px;
+            color: #ffd700; font-size: 8px; z-index: 50;
+            text-shadow: 2px 2px 0 #000; display: none;
+            pointer-events: none; line-height: 1.8;
+        }
+
+        .hidden { display: none !important; }
+        .loading-text { font-size: 10px; color: #ffd700; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+<div id="game-container">
+    <div id="hud">
+        PLAYER: <span id="hud-name">...</span><br>
+        SCRAPS: 0<br>
+        WALLS : 0
+    </div>
+
+    <!-- MAIN MENU -->
+    <div id="menu-screen" class="ui-panel">
+        <div class="box">
+            <h1>GHAST RIDER</h1>
+            <div id="player-loading" class="loading-text">Fetching Players...</div>
+            <div id="selection-area" class="hidden">
+                <h2>SELECT PLAYER</h2>
+                <div id="char-grid" class="char-grid"></div>
+                <button class="btn tall" id="start-btn">START MISSION</button>
+            </div>
+            <h2>LEADERBOARD</h2>
+            <div id="leaderboard-box" class="leaderboard">
+                <div class="leaderboard-row header"><span>RANK</span><span>NAME</span><span>SCRAPS</span><span>WALLS</span></div>
+                <div id="leaderboard-content">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MISSION FAILED SCREEN -->
+    <div id="death-screen" class="ui-panel hidden">
+        <div class="box">
+            <h1>MISSION FAILED</h1>
+            <p id="final-scraps" style="color: #ffd700; margin: 10px 0; font-size: 10px;">SCRAPS: 0</p>
+            <p id="final-walls" style="color: #ffffff; margin: 10px 0; font-size: 10px;">WALLS: 0</p>
+            <button class="btn tall" id="retry-btn">TRY AGAIN</button>
+            <h2>LEADERBOARD</h2>
+            <div class="leaderboard">
+                <div class="leaderboard-row header"><span>RANK</span><span>NAME</span><span>SCRAPS</span><span>WALLS</span></div>
+                <div id="leaderboard-content-death">Loading...</div>
+            </div>
+            <button class="btn secondary" id="switch-btn" style="margin-top: 20px;">SWITCH PLAYER</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+    /**
+     * MASTER CONFIGURATION
+     */
+    const GAME_CONFIG = {
+        // Paste your Firebase Realtime Database URL here:
+        firebaseURL: "https://ghastrider-default-rtdb.europe-west1.firebasedatabase.app/leaderboard",
+        defaultPlayers: ["Theo", "Tadeu", "Luise", "Max"]
+    };
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // UI Refs
+    const hud = document.getElementById('hud'), hudName = document.getElementById('hud-name'),
+          menuScreen = document.getElementById('menu-screen'), deathScreen = document.getElementById('death-screen'),
+          finalScrapsText = document.getElementById('final-scraps'), finalWallsText = document.getElementById('final-walls'),
+          lbContent = document.getElementById('leaderboard-content'), lbContentDeath = document.getElementById('leaderboard-content-death'),
+          charGrid = document.getElementById('char-grid'), playerLoading = document.getElementById('player-loading'),
+          selectionArea = document.getElementById('selection-area');
+
+    // Engine variables
+    let lastTime = 0, spawnTimer = 0, scrapTimer = 0, powerupTimeLeft = 0;
+    let scrapSpawnsCounter = 0, nextNuggetAt = Math.floor(Math.random() * 6) + 5; 
+
+    // Game state
+    let state = 'MENU', scrapScore = 0, wallScore = 0, isThrusting = false;
+    let entities = [], particles = [], trail = [], bgLayers = [], ashParticles = [];
+    let selectedPlayer = 'Theo', leaderboard = {};
+
+    const BASE_FPS = 60, SCROLL_SPEED = 4.5, POWERUP_DURATION = 5000;
+
+    const player = {
+        x: 60, y: 0, w: 32, h: 32, vy: 0,
+        gravity: 0.20, thrust: -0.48,
+        reset() { this.y = canvas.height / 2; this.vy = 0; }
+    };
+
+    // --- DATA FETCHING ---
+    async function fetchLeaderboard() {
+        try {
+            const res = await fetch(`${GAME_CONFIG.firebaseURL}.json`);
+            const data = await res.json();
+            leaderboard = data || {};
+            populateCharacterSelection();
+            renderLeaderboard();
+            playerLoading.classList.add('hidden');
+            selectionArea.classList.remove('hidden');
+        } catch (err) {
+            populateCharacterSelection();
+            playerLoading.classList.add('hidden');
+            selectionArea.classList.remove('hidden');
+        }
+    }
+
+    function populateCharacterSelection() {
+        let names = Object.keys(leaderboard);
+        if (names.length === 0) names = GAME_CONFIG.defaultPlayers;
+        charGrid.innerHTML = '';
+        names.forEach(name => {
+            const card = document.createElement('div');
+            card.className = `char-card ${name === selectedPlayer ? 'selected' : ''}`;
+            const cv = document.createElement('canvas');
+            cv.width = 32; cv.height = 32; cv.style.width = '64px'; cv.style.height = '64px';
+            const label = document.createElement('div');
+            label.className = 'char-label'; label.innerText = name.toUpperCase();
+            card.append(cv, label); charGrid.appendChild(card);
+            const pctx = cv.getContext('2d');
+            pctx.imageSmoothingEnabled = false;
+            drawPixelPlayer(pctx, 4, 15, name, 0, false, false);
+            card.onclick = () => {
+                selectedPlayer = name;
+                document.querySelectorAll('.char-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+                hudName.innerText = selectedPlayer.toUpperCase();
+                renderLeaderboard();
+            };
+        });
+        hudName.innerText = selectedPlayer.toUpperCase();
+    }
+
+    function renderLeaderboard() {
+        const list = Object.keys(leaderboard).map(n => ({
+            name: n,
+            scraps: leaderboard[n].scraps || 0,
+            walls: leaderboard[n].walls || 0,
+            total: (leaderboard[n].scraps || 0) + (leaderboard[n].walls || 0)
+        })).sort((a, b) => b.total - a.total);
+
+        const html = list.map((item, i) => {
+            const rank = i + 1;
+            const suffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th';
+            return `<div class="leaderboard-row ${item.name === selectedPlayer ? 'highlight' : ''}">
+                <span>${rank}${suffix}</span><span>${item.name.toUpperCase()}</span>
+                <span>${item.scraps}</span><span>${item.walls}</span>
+            </div>`;
+        }).join('');
+        lbContent.innerHTML = lbContentDeath.innerHTML = html || "No scores.";
+    }
+
+    async function updatePlayer(name, scraps, walls) {
+        const existing = leaderboard[name] || { scraps: 0, walls: 0 };
+        if (scraps + walls <= (existing.scraps || 0) + (existing.walls || 0)) return;
+        try {
+            await fetch(`${GAME_CONFIG.firebaseURL}/${name}.json`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ scraps, walls })
+            });
+            fetchLeaderboard(); 
+        } catch(e) {}
+    }
+
+    // --- RENDER HELPERS ---
+    function drawPixelPlayer(ctx, x, y, name, time, isGold, blink) {
+        if (blink && Math.floor(time / 60) % 2 === 0) return;
+        ctx.fillStyle = isGold ? '#ffd700' : '#ffdbac'; 
+        ctx.fillRect(x + 5, y - 10, 6, 6);
+        if (!isGold) {
+            const low = name.toLowerCase();
+            if (low === 'theo') {
+                ctx.fillStyle = '#4b3621'; ctx.fillRect(x + 4, y - 11, 8, 2); 
+                ctx.fillRect(x + 4, y - 10, 2, 3); ctx.fillRect(x + 10, y - 10, 2, 3); 
+                ctx.fillStyle = '#5c3a21'; ctx.fillRect(x + 6, y - 8, 1, 1); ctx.fillRect(x + 9, y - 8, 1, 1);
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(x + 5, y - 4, 6, 6);
+                ctx.fillStyle = '#20b2aa'; ctx.fillRect(x + 5, y - 4, 6, 2);
+            } else if (low === 'tadeu') {
+                ctx.fillStyle = '#111'; ctx.fillRect(x + 5, y - 11, 6, 2);
+                ctx.fillStyle = '#333'; ctx.fillRect(x + 6, y - 8, 1, 1); ctx.fillRect(x + 9, y - 8, 1, 1);
+                ctx.fillStyle = '#1e40af'; ctx.fillRect(x + 5, y - 4, 6, 6);
+            } else if (low === 'luise') {
+                ctx.fillStyle = '#ea580c'; ctx.fillRect(x + 4, y - 11, 8, 2);
+                ctx.fillRect(x + 4, y - 9, 2, 10); ctx.fillRect(x + 10, y - 9, 2, 10);
+                ctx.fillStyle = '#5c3a21'; ctx.fillRect(x + 6, y - 8, 1, 1); ctx.fillRect(x + 9, y - 8, 1, 1);
+                ctx.fillStyle = '#db2777'; ctx.fillRect(x + 5, y - 4, 6, 6);
+            } else if (low === 'max') {
+                ctx.fillStyle = '#fbbf24'; ctx.fillRect(x + 5, y - 11, 6, 2);
+                ctx.fillStyle = '#1d4ed8'; ctx.fillRect(x + 6, y - 8, 1, 1); ctx.fillRect(x + 9, y - 8, 1, 1);
+                ctx.fillStyle = '#15803d'; ctx.fillRect(x + 5, y - 4, 6, 6);
+            } else {
+                ctx.fillStyle = '#222'; ctx.fillRect(x + 5, y - 11, 6, 2);
+                ctx.fillStyle = '#7c2d12'; ctx.fillRect(x + 5, y - 4, 6, 6);
+            }
+            ctx.fillStyle = '#e2a698'; ctx.fillRect(x + 7, y - 6, 2, 1);
+        } else {
+            ctx.fillStyle = '#fff7cc'; ctx.fillRect(x + 6, y - 9, 2, 2); ctx.fillRect(x + 5, y - 2, 4, 4);
+        }
+    }
+
+    function drawPixelGhast(ctx, x, y, time, isGold, blink) {
+        if (blink && Math.floor(time / 60) % 2 === 0) return;
+        ctx.fillStyle = isGold ? '#ffd700' : '#ffffff'; ctx.fillRect(x, y, 28, 20);
+        if (!isGold) {
+            ctx.fillStyle = '#111'; ctx.fillRect(x + 16, y + 4, 3, 5); ctx.fillRect(x + 23, y + 4, 3, 5);
+            ctx.fillStyle = '#ffbaba'; ctx.fillRect(x + 14, y + 10, 3, 2); ctx.fillRect(x + 25, y + 10, 3, 2);
+            ctx.fillStyle = '#eeeeee';
+        } else { ctx.fillStyle = '#fff7cc'; ctx.fillRect(x + 18, y + 6, 4, 4); }
+        for(let i=0; i<3; i++) {
+            const wave = Math.sin(time * 0.01 + i) * 3;
+            ctx.fillRect(x + 3 + (i * 9), y + 20, 5, 6 + wave);
+        }
+    }
+
+    // --- GAME ENGINE ---
+    function nuclearReset() {
+        state = 'PLAYING'; scrapScore = 0; wallScore = 0; entities = []; particles = []; trail = [];
+        isThrusting = false; player.reset(); spawnTimer = 0; scrapTimer = 0; powerupTimeLeft = 0;
+        scrapSpawnsCounter = 0; nextNuggetAt = Math.floor(Math.random() * 6) + 5; 
+        bgLayers = []; generateBG(); generateAsh();
+        menuScreen.classList.add('hidden'); deathScreen.classList.add('hidden');
+        hud.style.display = 'block'; updateHUD();
+    }
+
+    function generateBG() {
+        for(let i=0; i<6; i++) bgLayers.push({ x: i * 350, y: canvas.height - 280, w: 450, h: 260, speed: 0.6, type: 'cliff', color: '#110303' });
+        for(let i=0; i<8; i++) bgLayers.push({ x: Math.random() * canvas.width * 2, y: Math.random() * (canvas.height - 200), w: 70 + Math.random() * 50, h: 25 + Math.random() * 20, speed: 1.2, type: 'island', color: '#160404' });
+    }
+
+    function generateAsh() {
+        ashParticles = [];
+        for(let i=0; i<80; i++) {
+            const cols = ['#ffffff', '#ffd700', '#ffaa00'];
+            ashParticles.push({
+                x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+                size: Math.random() * 2.5 + 1, speedX: Math.random() * 3 + 2, speedY: Math.random() * 2 + 1,
+                baseOpacity: Math.random() * 0.5 + 0.2, shimmerSpeed: Math.random() * 0.1 + 0.05,
+                color: cols[Math.floor(Math.random() * cols.length)]
+            });
+        }
+    }
+
+    function updateHUD() { hud.innerHTML = `PLAYER: ${selectedPlayer.toUpperCase()}<br>SCRAPS: ${scrapScore}<br>WALLS : ${wallScore}`; }
+
+    document.getElementById('start-btn').onclick = nuclearReset;
+    document.getElementById('retry-btn').onclick = nuclearReset;
+    document.getElementById('switch-btn').onclick = () => { state = 'MENU'; menuScreen.classList.remove('hidden'); deathScreen.classList.add('hidden'); hud.style.display = 'none'; fetchLeaderboard(); };
+
+    const act = (v) => { if (state === 'PLAYING') isThrusting = v; };
+    window.onmousedown = () => act(true); window.onmouseup = () => act(false);
+    window.ontouchstart = (e) => { if(state === 'PLAYING') e.preventDefault(); act(true); };
+    window.ontouchend = (e) => { if(state === 'PLAYING') e.preventDefault(); act(false); };
+    window.onkeydown = (e) => { if(e.code === 'Space' || e.code === 'ArrowUp') { if(state === 'PLAYING') act(true); else { e.preventDefault(); nuclearReset(); } } };
+    window.onkeyup = (e) => { if(e.code === 'Space' || e.code === 'ArrowUp') act(false); };
+
+    function drawNetherWall(ctx, x, y, w, h) {
+        ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); 
+        ctx.fillStyle = '#1a0810'; ctx.fillRect(x, y, w, h);
+        const bH = 12, bW = 22, p = 2; ctx.fillStyle = '#2e101b';
+        for (let r = 0; r < h; r += bH) {
+            let off = (Math.floor(r / bH) % 2) * (bW / 2);
+            for (let c = -bW; c < w + bW; c += bW) ctx.fillRect(x + c + off + p/2, y + r + p/2, bW - p, bH - p);
+        }
+        ctx.restore(); ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(x, y, 4, h); ctx.fillRect(x + w - 4, y, 4, h);
+    }
+
+    function drawNetherScrap(ctx, x, y, w, h) {
+        ctx.fillStyle = '#3c2d23'; ctx.fillRect(x, y, w, h);
+        ctx.fillStyle = '#5d4037'; ctx.fillRect(x + 2, y + 2, 6, 6); ctx.fillRect(x + 10, y + 8, 4, 4);
+        ctx.fillStyle = '#2a1e17'; ctx.fillRect(x + w - 6, y + h - 6, 6, 6);
+    }
+
+    function drawGoldNugget(ctx, x, y, time) {
+        const bounce = Math.sin(time * 0.01) * 8, shm = Math.abs(Math.sin(time * 0.02));
+        ctx.fillStyle = '#ffd700'; ctx.fillRect(x, y + bounce, 22, 18);
+        ctx.fillStyle = `rgba(255, 255, 200, ${shm})`; ctx.fillRect(x + 4, y + 4 + bounce, 10, 6);
+    }
+
+    function gameLoop(timestamp) {
+        const dt = Math.min((timestamp - (lastTime || timestamp)) / (1000 / BASE_FPS), 3);
+        lastTime = timestamp;
+
+        ctx.fillStyle = '#0a0101'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        bgLayers.forEach(l => {
+            if (state === 'PLAYING') l.x -= l.speed * dt;
+            if (l.x + l.w < -100) l.x = canvas.width + Math.random() * 100;
+            ctx.fillStyle = l.color;
+            if (l.type === 'cliff') { ctx.beginPath(); ctx.moveTo(l.x, l.y + l.h); ctx.lineTo(l.x + l.w/2, l.y); ctx.lineTo(l.x + l.w, l.y + l.h); ctx.fill(); }
+            else ctx.fillRect(l.x, l.y, l.w, l.h);
+        });
+
+        for (let i = trail.length - 1; i >= 0; i--) {
+            const t = trail[i]; t.x -= SCROLL_SPEED * dt; t.life -= 0.015 * dt;
+            if (t.life <= 0) { trail.splice(i, 1); continue; }
+            ctx.fillStyle = `rgba(255, 255, 255, ${t.life * 0.15})`; ctx.beginPath(); ctx.arc(t.x, t.y, t.size, 0, Math.PI * 2); ctx.fill();
+        }
+
+        ctx.fillStyle = '#ff4500'; ctx.fillRect(0, canvas.height - 20, canvas.width, 20);
+
+        if (state === 'PLAYING') {
+            spawnTimer += dt; scrapTimer += dt; if (powerupTimeLeft > 0) powerupTimeLeft -= (dt * 16.6);
+            if (isThrusting) {
+                player.vy += player.thrust * dt;
+                if (Math.random() < 0.2 * dt) particles.push({ x: player.x, y: player.y + 15, vx: -1-Math.random()*2, vy: (Math.random()-0.5)*3, life: 1, color: '#ff9900' });
+            }
+            player.vy += player.gravity * dt; player.y += player.vy * dt;
+            if (Math.random() < 0.3 * dt) trail.push({ x: player.x + 5, y: player.y + 10, life: 1.0, size: 4 + Math.random() * 6 });
+            if (player.y < 0) { player.y = 0; player.vy = 0; }
+            if (player.y > canvas.height - 40) endGame();
+
+            if (spawnTimer >= 85) {
+                spawnTimer = 0; const gap = 160, h = Math.random() * (canvas.height - gap - 100) + 50;
+                entities.push({ x: canvas.width, y: 0, w: 50, h: h, type: 'wall', passed: false }, { x: canvas.width, y: h + gap, w: 50, h: canvas.height, type: 'wall-bottom', passed: false });
+            }
+
+            if (scrapTimer >= 60) {
+                scrapTimer = 0; scrapSpawnsCounter++;
+                const sx = canvas.width + 20; let sy = 0, safe = false, att = 0;
+                while(!safe && att < 15) {
+                    sy = Math.random() * (canvas.height - 120) + 60; safe = true;
+                    for(let e of entities) if((e.type === 'wall' || e.type === 'wall-bottom') && sx < e.x + e.w + 5 && sx + 25 > e.x && sy < e.y + e.h + 5 && sy + 25 > e.y) { safe = false; break; }
+                    att++;
+                }
+                if (safe) {
+                    if (scrapSpawnsCounter >= nextNuggetAt) { scrapSpawnsCounter = 0; nextNuggetAt = Math.floor(Math.random() * 6) + 5; entities.push({ x: sx, y: sy, w: 22, h: 18, type: 'nugget' }); }
+                    else entities.push({ x: sx, y: sy, w: 20, h: 20, type: 'scrap' });
+                }
+            }
+
+            for (let i = entities.length - 1; i >= 0; i--) {
+                const e = entities[i]; e.x -= SCROLL_SPEED * dt;
+                if (e.type === 'wall' && !e.passed && player.x > e.x + e.w) { e.passed = true; wallScore++; updateHUD(); }
+                if (e.type === 'wall' || e.type === 'wall-bottom') drawNetherWall(ctx, e.x, e.y, e.w, e.h);
+                else if (e.type === 'scrap') drawNetherScrap(ctx, e.x, e.y + Math.sin(timestamp * 0.005) * 6, e.w, e.h);
+                else if (e.type === 'nugget') drawGoldNugget(ctx, e.x, e.y, timestamp);
+                const pB = { x: player.x + 5, y: player.y + 5, w: player.w - 10, h: player.h - 10 };
+                if (pB.x < e.x + e.w && pB.x + pB.w > e.x && pB.y < e.y + e.h && pB.y + pB.h > e.y) {
+                    if (e.type === 'wall' || e.type === 'wall-bottom') { if (powerupTimeLeft <= 0) endGame(); }
+                    else if (e.type === 'scrap') { scrapScore++; updateHUD(); for(let j=0; j<8; j++) particles.push({ x: e.x, y: e.y, vx: -2+Math.random()*4, vy: -2+Math.random()*4, life: 1, color: '#ffd700' }); entities.splice(i, 1); }
+                    else if (e.type === 'nugget') { powerupTimeLeft = POWERUP_DURATION; for(let j=0; j<15; j++) particles.push({ x: e.x, y: e.y, vx: -3+Math.random()*6, vy: -3+Math.random()*6, life: 1, color: '#ffffff' }); entities.splice(i, 1); }
+                }
+                if (e.x < -150) entities.splice(i, 1);
+            }
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 0.04 * dt;
+                if (p.life <= 0) { particles.splice(i, 1); continue; }
+                ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 3, 3);
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        if (state !== 'DEAD') {
+            ctx.save();
+            const bob = (state === 'MENU') ? Math.sin(timestamp * 0.005) * 8 : 0;
+            ctx.translate(player.x, player.y + bob);
+            const isG = powerupTimeLeft > 0, blnk = powerupTimeLeft > 0 && powerupTimeLeft < 2000;
+            drawPixelGhast(ctx, 0, 0, timestamp, isG, blnk); drawPixelPlayer(ctx, 0, 0, selectedPlayer, timestamp, isG, blnk);
+            ctx.restore();
+        }
+
+        // --- FOREGROUND SPARKS ---
+        ashParticles.forEach(p => {
+            if (state === 'PLAYING') { p.x -= (p.speedX + SCROLL_SPEED * 1.4) * dt; p.y += p.speedY * dt; }
+            if (p.x < -20) p.x = canvas.width + 20; if (p.y > canvas.height + 20) { p.y = -20; p.x = Math.random() * canvas.width; }
+            const flk = Math.random() > 0.96 ? 1.0 : (p.baseOpacity + (Math.sin(timestamp * p.shimmerSpeed) * 0.15));
+            ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0.05, flk);
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+            if (p.size > 2) { ctx.globalAlpha = flk * 0.3; ctx.fillRect(p.x - 1, p.y - 1, p.size + 2, p.size + 2); }
+        });
+        ctx.globalAlpha = 1;
+        requestAnimationFrame(gameLoop);
+    }
+
+    function endGame() {
+        if (state === 'DEAD') return;
+        state = 'DEAD'; isThrusting = false;
+        deathScreen.classList.remove('hidden'); hud.style.display = 'none';
+        finalScrapsText.innerText = "SCRAPS: " + scrapScore; finalWallsText.innerText = "WALLS : " + wallScore;
+        updatePlayer(selectedPlayer, scrapScore, wallScore);
+    }
+
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; player.reset(); if (state === 'MENU') { bgLayers = []; generateBG(); generateAsh(); } }
+    window.onresize = resize; resize(); fetchLeaderboard(); requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
