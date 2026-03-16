@@ -424,9 +424,100 @@
     }
 
     // --- RENDER HELPERS ---
+    function getScrapGearTier() {
+        return Math.min(10, Math.floor(scrapScore / 3));
+    }
+
+    function drawPlayerNetheriteGear(ctx, x, y, tier) {
+        if (tier <= 0) return;
+        const plate = '#4d4e63';
+        const edge = '#8b8ea8';
+        const shadow = '#2b2d3c';
+        const glow = '#6f7392';
+
+        if (tier >= 1) {
+            ctx.fillStyle = shadow; ctx.fillRect(x + 4, y + 1, 1, 8); ctx.fillRect(x + 11, y + 1, 1, 8);
+            ctx.fillStyle = plate; ctx.fillRect(x + 4, y, 2, 8); ctx.fillRect(x + 10, y, 2, 8);
+            ctx.fillStyle = edge; ctx.fillRect(x + 5, y + 1, 1, 6); ctx.fillRect(x + 10, y + 1, 1, 6);
+        }
+        if (tier >= 2) {
+            ctx.fillStyle = plate; ctx.fillRect(x + 5, y - 12, 6, 2);
+            ctx.fillRect(x + 4, y - 10, 2, 2); ctx.fillRect(x + 10, y - 10, 2, 2);
+            ctx.fillStyle = edge; ctx.fillRect(x + 6, y - 11, 4, 1);
+        }
+        if (tier >= 3) {
+            ctx.fillStyle = shadow; ctx.fillRect(x + 4, y - 4, 8, 7);
+            ctx.fillStyle = plate; ctx.fillRect(x + 5, y - 4, 6, 6);
+            ctx.fillStyle = edge; ctx.fillRect(x + 6, y - 3, 4, 1);
+        }
+        if (tier >= 4) {
+            ctx.fillStyle = plate; ctx.fillRect(x + 3, y - 2, 2, 3); ctx.fillRect(x + 11, y - 2, 2, 3);
+            ctx.fillStyle = edge; ctx.fillRect(x + 4, y - 1, 1, 2); ctx.fillRect(x + 11, y - 1, 1, 2);
+        }
+        if (tier >= 5) {
+            ctx.fillStyle = plate; ctx.fillRect(x + 5, y + 6, 2, 3); ctx.fillRect(x + 9, y + 6, 2, 3);
+            ctx.fillStyle = edge; ctx.fillRect(x + 5, y + 7, 2, 1); ctx.fillRect(x + 9, y + 7, 2, 1);
+        }
+        if (tier >= 6) {
+            ctx.fillStyle = glow; ctx.fillRect(x + 6, y - 1, 4, 1); ctx.fillRect(x + 6, y + 2, 4, 1);
+        }
+        if (tier >= 7) {
+            ctx.fillStyle = edge; ctx.fillRect(x + 5, y - 13, 1, 2); ctx.fillRect(x + 10, y - 13, 1, 2);
+            ctx.fillStyle = plate; ctx.fillRect(x + 6, y - 14, 4, 1);
+        }
+        if (tier >= 8) {
+            ctx.fillStyle = shadow; ctx.fillRect(x + 3, y + 2, 1, 5); ctx.fillRect(x + 12, y + 2, 1, 5);
+            ctx.fillStyle = plate; ctx.fillRect(x + 3, y + 2, 1, 4); ctx.fillRect(x + 12, y + 2, 1, 4);
+        }
+        if (tier >= 9) {
+            ctx.fillStyle = shadow; ctx.fillRect(x - 2, y - 1, 1, 9);
+            ctx.fillStyle = plate; ctx.fillRect(x - 1, y - 1, 3, 8);
+            ctx.fillStyle = edge; ctx.fillRect(x, y, 1, 6); ctx.fillRect(x - 2, y + 1, 1, 4);
+        }
+        if (tier >= 10) {
+            ctx.fillStyle = shadow; ctx.fillRect(x + 13, y - 3, 1, 12);
+            ctx.fillStyle = plate; ctx.fillRect(x + 14, y - 2, 2, 9);
+            ctx.fillStyle = edge; ctx.fillRect(x + 14, y - 1, 2, 1); ctx.fillRect(x + 14, y + 3, 2, 1);
+            ctx.fillStyle = '#2f2a24'; ctx.fillRect(x + 14, y + 7, 2, 2);
+            ctx.fillStyle = '#6b4f2a'; ctx.fillRect(x + 13, y + 6, 4, 1);
+        }
+    }
+
+    function drawGhastNetheriteGear(ctx, x, y, tier) {
+        if (tier <= 0) return;
+        const strap = '#414455';
+        const plate = '#575b73';
+        const edge = '#959ab6';
+        const glass = '#a9d8ff';
+
+        if (tier >= 2) {
+            ctx.fillStyle = strap; ctx.fillRect(x + 3, y + 5, 22, 2);
+        }
+        if (tier >= 4) {
+            ctx.fillStyle = plate; ctx.fillRect(x + 5, y + 2, 6, 3); ctx.fillRect(x + 17, y + 2, 6, 3);
+            ctx.fillStyle = edge; ctx.fillRect(x + 6, y + 3, 4, 1); ctx.fillRect(x + 18, y + 3, 4, 1);
+        }
+        if (tier >= 6) {
+            ctx.fillStyle = strap; ctx.fillRect(x + 8, y + 0, 12, 2);
+            ctx.fillStyle = plate; ctx.fillRect(x + 10, y - 1, 8, 2);
+            ctx.fillStyle = edge; ctx.fillRect(x + 11, y, 6, 1);
+        }
+        if (tier >= 8) {
+            ctx.fillStyle = plate; ctx.fillRect(x + 1, y + 8, 3, 5); ctx.fillRect(x + 24, y + 8, 3, 5);
+            ctx.fillStyle = edge; ctx.fillRect(x + 2, y + 9, 1, 3); ctx.fillRect(x + 25, y + 9, 1, 3);
+        }
+        if (tier >= 10) {
+            ctx.fillStyle = strap; ctx.fillRect(x + 9, y + 5, 11, 1);
+            ctx.fillStyle = plate; ctx.fillRect(x + 10, y + 4, 4, 4); ctx.fillRect(x + 16, y + 4, 4, 4);
+            ctx.fillStyle = glass; ctx.fillRect(x + 11, y + 5, 2, 2); ctx.fillRect(x + 17, y + 5, 2, 2);
+            ctx.fillStyle = edge; ctx.fillRect(x + 10, y + 4, 10, 1);
+        }
+    }
+
     function drawPixelPlayer(ctx, x, y, name, time, isGold, isFire, blink) {
         if (blink && Math.floor(time / 60) % 2 === 0) return;
         const isDead = state === 'DYING';
+        const gearTier = getScrapGearTier();
         if (pickupFlashTimeLeft > 0) {
             ctx.fillStyle = `rgba(255, 248, 220, ${Math.min(0.9, pickupFlashTimeLeft / 220)})`;
             ctx.fillRect(x + 2, y - 14, 12, 18);
@@ -479,11 +570,13 @@
             ctx.fillStyle = `rgba(255, 235, 120, ${0.25 + glowFlicker * 0.3})`;
             ctx.fillRect(x + 4, y - 5, 8, 8);
         }
+        if (!isDead) drawPlayerNetheriteGear(ctx, x, y, gearTier);
     }
 
     function drawPixelGhast(ctx, x, y, time, isGold, isFire, blink) {
         if (blink && Math.floor(time / 60) % 2 === 0) return;
         const isDead = state === 'DYING';
+        const gearTier = getScrapGearTier();
         if (pickupFlashTimeLeft > 0) {
             ctx.fillStyle = `rgba(255, 248, 220, ${Math.min(0.75, pickupFlashTimeLeft / 260)})`;
             ctx.fillRect(x - 3, y - 4, 34, 28);
@@ -522,6 +615,7 @@
             ctx.fillStyle = '#ffd166';
             ctx.fillRect(x + 12, y - 3, 2, 3);
         }
+        if (!isDead) drawGhastNetheriteGear(ctx, x, y, gearTier);
     }
 
     // --- GAME ENGINE ---
@@ -562,6 +656,15 @@
         hud.innerHTML = `PLAYER: ${selectedPlayer.toUpperCase()}<br>EMERALDS: ${emeraldScore}<br>SCRAPS: ${scrapScore}<br>WALLS : ${wallScore}`;
     }
 
+    function applyArmorCheatStep() {
+        if (scrapScore >= 30) return;
+        scrapScore = Math.min(30, scrapScore + 3);
+        updateHUD();
+        if (state === 'MENU') populateCharacterSelection();
+        ensureAudio();
+        playSound('scrap');
+    }
+
     document.getElementById('start-btn').onclick = () => {
         ensureAudio();
         playSound('menu-start');
@@ -585,6 +688,11 @@
     window.ontouchstart = (e) => { if(state === 'PLAYING') e.preventDefault(); act(true); };
     window.ontouchend = (e) => { if(state === 'PLAYING') e.preventDefault(); act(false); };
     window.onkeydown = (e) => { 
+        if (e.code === 'Digit9') {
+            applyArmorCheatStep();
+            e.preventDefault();
+            return;
+        }
         if (e.code === 'Digit0') {
             if (state === 'PLAYING') {
                 showTrajectory = !showTrajectory;
