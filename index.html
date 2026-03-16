@@ -68,6 +68,7 @@
 
         .btn.tall { padding: 22px 0; font-size: 11px; }
         .btn.secondary { background: #4b3621; border-bottom: 4px solid #2b1d14; }
+        .btn.toggle-on { background: #2f8f6b; border-bottom: 4px solid #1d5c45; }
         .btn:active { transform: translateY(2px); border-bottom-width: 2px; }
 
         .char-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
@@ -131,6 +132,7 @@
                 <h2>SELECT PLAYER</h2>
                 <div id="char-grid" class="char-grid"></div>
                 <button class="btn tall" id="start-btn">START MISSION</button>
+                <button class="btn secondary" id="sound-toggle-btn">SFX: ON</button>
             </div>
             <h2>LEADERBOARD</h2>
             <div id="leaderboard-box" class="leaderboard">
@@ -184,19 +186,25 @@
           lbContentDeath = document.getElementById('leaderboard-content-death'),
           charGrid = document.getElementById('char-grid'), 
           playerLoading = document.getElementById('player-loading'),
-          selectionArea = document.getElementById('selection-area');
+          selectionArea = document.getElementById('selection-area'),
+          soundToggleBtn = document.getElementById('sound-toggle-btn');
 
     // Engine variables
-    let lastTime = 0, spawnTimer = 0, scrapTimer = 0, powerupTimeLeft = 0, fireResistTimeLeft = 0, pickupFlashTimeLeft = 0;
+    let lastTime = 0, spawnTimer = 0, scrapTimer = 0, powerupTimeLeft = 0, fireResistTimeLeft = 0, pickupFlashTimeLeft = 0, lavaScroll = 0, wasTouchingLava = false;
     let collectibleSpawnsCounter = 0,
         nextNuggetAt = Math.floor(Math.random() * 6) + 5,
         nextPotionAt = (Math.floor(Math.random() * 6) + 5) * 2;
-    let nextVillagerAt = Math.floor(Math.random() * 8) + 12, rewardTimer = 0;
+    let nextVillagerAt = Math.floor(Math.random() * 8) + 12, rewardTimer = 0, deathTimer = 0, deathCause = null;
 
     // Game state
-    let state = 'MENU', scrapScore = 0, wallScore = 0, emeraldScore = 0, isThrusting = false;
+    let state = 'MENU', scrapScore = 0, wallScore = 0, emeraldScore = 0, isThrusting = false, showTrajectory = false;
     let entities = [], particles = [], trail = [], bgLayers = [], ashParticles = [];
     let selectedPlayer = 'Theo', leaderboard = {};
+    let audioCtx = null, masterGain = null, audioCompressor = null, audioReady = false, lastThrusterSoundAt = 0;
+    let soundEnabled = (() => {
+        try { return localStorage.getItem('ghastrider-sfx-enabled') !== '0'; }
+        catch (e) { return true; }
+    })();
 
     const BASE_FPS = 60, SCROLL_SPEED = 4.5, POWERUP_DURATION = 5000, FIRE_RESIST_DURATION = 7000;
 
@@ -208,6 +216,131 @@
 
     function calculateTotalScore(scores) {
         return (scores.emeralds || 0) * 10 + (scores.scraps || 0) * 3 + (scores.walls || 0);
+    }
+
+    function ensureAudio() {
+        if (!soundEnabled) return false;
+        if (audioReady) return true;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return false;
+        if (!audioCtx) {
+            audioCtx = new AudioContextClass();
+            masterGain = audioCtx.createGain();
+            masterGain.gain.value = 0.42;
+            audioCompressor = audioCtx.createDynamicsCompressor();
+            audioCompressor.threshold.setValueAtTime(-24, audioCtx.currentTime);
+            audioCompressor.knee.setValueAtTime(18, audioCtx.currentTime);
+            audioCompressor.ratio.setValueAtTime(10, audioCtx.currentTime);
+            audioCompressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
+            audioCompressor.release.setValueAtTime(0.18, audioCtx.currentTime);
+            masterGain.connect(audioCompressor);
+            audioCompressor.connect(audioCtx.destination);
+        }
+        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        audioReady = audioCtx.state === 'running';
+        return audioReady;
+    }
+
+    function updateSoundToggleUI() {
+        soundToggleBtn.innerText = `SFX: ${soundEnabled ? 'ON' : 'OFF'}`;
+        soundToggleBtn.classList.toggle('toggle-on', soundEnabled);
+    }
+
+    function setSoundEnabled(enabled) {
+        soundEnabled = enabled;
+        try { localStorage.setItem('ghastrider-sfx-enabled', soundEnabled ? '1' : '0'); } catch (e) {}
+        if (masterGain) masterGain.gain.value = soundEnabled ? 0.42 : 0;
+        updateSoundToggleUI();
+    }
+
+    function playTone(type, frequency, startTime, duration, volume, frequencyEnd = frequency) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(frequency, startTime);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, frequencyEnd), startTime + duration);
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.exponentialRampToValueAtTime(volume, startTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(startTime);
+        osc.stop(startTime + duration);
+    }
+
+    function playNoise(startTime, duration, volume, filterType, frequency) {
+        const buffer = audioCtx.createBuffer(1, Math.max(1, Math.floor(audioCtx.sampleRate * duration)), audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = filterType;
+        filter.frequency.setValueAtTime(frequency, startTime);
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(volume, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(masterGain);
+        source.start(startTime);
+        source.stop(startTime + duration);
+    }
+
+    function playSound(effect) {
+        if (!ensureAudio()) return;
+        const now = audioCtx.currentTime;
+
+        if (effect === 'scrap') {
+            playTone('square', 520, now, 0.07, 0.11, 760);
+            playTone('triangle', 380, now + 0.02, 0.08, 0.08, 520);
+        } else if (effect === 'menu-select') {
+            playTone('square', 460, now, 0.07, 0.08, 620);
+            playTone('triangle', 620, now + 0.04, 0.08, 0.06, 760);
+        } else if (effect === 'menu-toggle-on') {
+            playTone('square', 340, now, 0.08, 0.08, 520);
+            playTone('triangle', 520, now + 0.05, 0.1, 0.07, 760);
+        } else if (effect === 'menu-toggle-off') {
+            playTone('triangle', 420, now, 0.08, 0.06, 300);
+            playTone('sine', 260, now + 0.03, 0.09, 0.05, 180);
+        } else if (effect === 'menu-start') {
+            playTone('square', 280, now, 0.07, 0.07, 420);
+            playTone('square', 420, now + 0.05, 0.08, 0.08, 620);
+            playTone('triangle', 620, now + 0.1, 0.12, 0.08, 920);
+        } else if (effect === 'nugget') {
+            playTone('square', 420, now, 0.12, 0.12, 960);
+            playTone('triangle', 700, now + 0.05, 0.16, 0.1, 1320);
+            playNoise(now, 0.12, 0.032, 'highpass', 1200);
+        } else if (effect === 'potion') {
+            playTone('triangle', 280, now, 0.13, 0.095, 560);
+            playTone('sine', 620, now + 0.06, 0.22, 0.085, 980);
+            playNoise(now + 0.03, 0.14, 0.024, 'bandpass', 950);
+        } else if (effect === 'emerald') {
+            playTone('triangle', 520, now, 0.1, 0.1, 780);
+            playTone('triangle', 780, now + 0.07, 0.12, 0.11, 1180);
+            playTone('sine', 980, now + 0.15, 0.18, 0.085, 1460);
+        } else if (effect === 'wall-hit') {
+            playNoise(now, 0.16, 0.055, 'lowpass', 700);
+            playTone('sawtooth', 180, now, 0.18, 0.075, 70);
+        } else if (effect === 'lava-hit') {
+            playNoise(now, 0.22, 0.07, 'bandpass', 540);
+            playTone('sawtooth', 240, now, 0.2, 0.08, 80);
+        } else if (effect === 'lava-splash') {
+            playNoise(now, 0.1, 0.03, 'bandpass', 850);
+            playTone('triangle', 170, now, 0.08, 0.05, 120);
+        } else if (effect === 'start') {
+            playTone('square', 320, now, 0.08, 0.08, 480);
+            playTone('square', 520, now + 0.06, 0.1, 0.09, 760);
+        } else if (effect === 'thruster') {
+            if (now - lastThrusterSoundAt < 0.09) return;
+            lastThrusterSoundAt = now;
+            playNoise(now, 0.05, 0.024, 'highpass', 600);
+            playTone('triangle', 150, now, 0.05, 0.038, 110);
+        }
     }
 
     // --- DATA FETCHING ---
@@ -244,6 +377,8 @@
             pctx.imageSmoothingEnabled = false;
             drawPixelPlayer(pctx, 4, 15, name, 0, false, false, false);
             card.onclick = () => {
+                ensureAudio();
+                playSound('menu-select');
                 selectedPlayer = name;
                 document.querySelectorAll('.char-card').forEach(c => c.classList.remove('selected'));
                 card.classList.add('selected');
@@ -291,15 +426,21 @@
     // --- RENDER HELPERS ---
     function drawPixelPlayer(ctx, x, y, name, time, isGold, isFire, blink) {
         if (blink && Math.floor(time / 60) % 2 === 0) return;
+        const isDead = state === 'DYING';
         if (pickupFlashTimeLeft > 0) {
             ctx.fillStyle = `rgba(255, 248, 220, ${Math.min(0.9, pickupFlashTimeLeft / 220)})`;
             ctx.fillRect(x + 2, y - 14, 12, 18);
         }
         const glowFlicker = Math.abs(Math.sin(time * 0.02));
-        const skinTone = isFire ? '#ffb26b' : isGold ? '#ffe680' : '#ffdbac';
+        const skinTone = isDead ? '#8f745f' : isFire ? '#ffb26b' : isGold ? '#ffe680' : '#ffdbac';
         ctx.fillStyle = skinTone; 
         ctx.fillRect(x + 5, y - 10, 6, 6);
-        if (!isGold && !isFire) {
+        if (isDead) {
+            ctx.fillStyle = '#1b1b1b'; ctx.fillRect(x + 5, y - 4, 6, 6);
+            ctx.fillStyle = '#5a5a5a'; ctx.fillRect(x + 4, y - 11, 8, 2);
+            ctx.fillStyle = '#2c2c2c'; ctx.fillRect(x + 6, y - 8, 1, 1); ctx.fillRect(x + 9, y - 8, 1, 1);
+            ctx.fillStyle = '#6f4b4b'; ctx.fillRect(x + 7, y - 6, 2, 1);
+        } else if (!isGold && !isFire) {
             const low = name.toLowerCase();
             if (low === 'theo') {
                 ctx.fillStyle = '#4b3621'; ctx.fillRect(x + 4, y - 11, 8, 2); 
@@ -342,13 +483,20 @@
 
     function drawPixelGhast(ctx, x, y, time, isGold, isFire, blink) {
         if (blink && Math.floor(time / 60) % 2 === 0) return;
+        const isDead = state === 'DYING';
         if (pickupFlashTimeLeft > 0) {
             ctx.fillStyle = `rgba(255, 248, 220, ${Math.min(0.75, pickupFlashTimeLeft / 260)})`;
             ctx.fillRect(x - 3, y - 4, 34, 28);
         }
         const shimmer = Math.abs(Math.sin(time * 0.02));
-        ctx.fillStyle = isFire ? '#ffb15e' : isGold ? '#ffdd55' : '#ffffff'; ctx.fillRect(x, y, 28, 20);
-        if (!isGold && !isFire) {
+        ctx.fillStyle = isDead ? '#8e8e8e' : isFire ? '#ffb15e' : isGold ? '#ffdd55' : '#ffffff'; ctx.fillRect(x, y, 28, 20);
+        if (isDead) {
+            ctx.fillStyle = '#2b2b2b'; ctx.fillRect(x + 15, y + 6, 4, 1); ctx.fillRect(x + 23, y + 6, 4, 1);
+            ctx.fillRect(x + 16, y + 5, 2, 1); ctx.fillRect(x + 24, y + 5, 2, 1);
+            ctx.fillStyle = '#5b2c2c'; ctx.fillRect(x + 18, y + 12, 5, 2);
+            ctx.fillRect(x + 19, y + 13, 3, 1);
+            ctx.fillStyle = '#7c7c7c';
+        } else if (!isGold && !isFire) {
             ctx.fillStyle = '#111'; ctx.fillRect(x + 16, y + 4, 3, 5); ctx.fillRect(x + 23, y + 4, 3, 5);
             ctx.fillStyle = '#ffbaba'; ctx.fillRect(x + 14, y + 10, 3, 2); ctx.fillRect(x + 25, y + 10, 3, 2);
             ctx.fillStyle = '#eeeeee';
@@ -379,8 +527,9 @@
     // --- GAME ENGINE ---
     function nuclearReset() {
         state = 'PLAYING'; scrapScore = 0; wallScore = 0; emeraldScore = 0; entities = []; particles = []; trail = [];
-        isThrusting = false; player.reset(); spawnTimer = 0; scrapTimer = 0; powerupTimeLeft = 0; fireResistTimeLeft = 0; pickupFlashTimeLeft = 0;
+        isThrusting = false; player.reset(); spawnTimer = 0; scrapTimer = 0; powerupTimeLeft = 0; fireResistTimeLeft = 0; pickupFlashTimeLeft = 0; wasTouchingLava = false; deathTimer = 0; deathCause = null;
         collectibleSpawnsCounter = 0;
+        lastThrusterSoundAt = 0;
         nextNuggetAt = Math.floor(Math.random() * 6) + 5;
         nextPotionAt = (Math.floor(Math.random() * 6) + 5) * 2;
         nextVillagerAt = Math.floor(Math.random() * 8) + 12;
@@ -388,6 +537,7 @@
         bgLayers = []; generateBG(); generateAsh();
         menuScreen.classList.add('hidden'); deathScreen.classList.add('hidden');
         hud.style.display = 'block'; updateHUD();
+        playSound('start');
     }
 
     function generateBG() {
@@ -412,18 +562,39 @@
         hud.innerHTML = `PLAYER: ${selectedPlayer.toUpperCase()}<br>EMERALDS: ${emeraldScore}<br>SCRAPS: ${scrapScore}<br>WALLS : ${wallScore}`;
     }
 
-    document.getElementById('start-btn').onclick = nuclearReset;
+    document.getElementById('start-btn').onclick = () => {
+        ensureAudio();
+        playSound('menu-start');
+        nuclearReset();
+    };
+    soundToggleBtn.onclick = () => {
+        const nextEnabled = !soundEnabled;
+        if (nextEnabled) ensureAudio();
+        setSoundEnabled(nextEnabled);
+        playSound(nextEnabled ? 'menu-toggle-on' : 'menu-toggle-off');
+    };
     document.getElementById('retry-btn').onclick = nuclearReset;
     document.getElementById('switch-btn').onclick = () => { state = 'MENU'; menuScreen.classList.remove('hidden'); deathScreen.classList.add('hidden'); hud.style.display = 'none'; fetchLeaderboard(); };
+    updateSoundToggleUI();
 
-    const act = (v) => { if (state === 'PLAYING') isThrusting = v; };
+    const act = (v) => {
+        ensureAudio();
+        if (state === 'PLAYING') isThrusting = v;
+    };
     window.onmousedown = () => act(true); window.onmouseup = () => act(false);
     window.ontouchstart = (e) => { if(state === 'PLAYING') e.preventDefault(); act(true); };
     window.ontouchend = (e) => { if(state === 'PLAYING') e.preventDefault(); act(false); };
     window.onkeydown = (e) => { 
+        if (e.code === 'Digit0') {
+            if (state === 'PLAYING') {
+                showTrajectory = !showTrajectory;
+                e.preventDefault();
+            }
+            return;
+        }
         if(e.code === 'Space' || e.code === 'ArrowUp') { 
             if(state === 'PLAYING') act(true); 
-            else if (state === 'REWARD') { e.preventDefault(); }
+            else if (state === 'REWARD' || state === 'DYING') { e.preventDefault(); }
             else { e.preventDefault(); nuclearReset(); } 
         } 
     };
@@ -565,6 +736,61 @@
         }
     }
 
+    function spawnLavaSplash(x, y, intensity = 1) {
+        const bursts = Math.round(10 + intensity * 8);
+        for (let i = 0; i < bursts; i++) {
+            particles.push({
+                x: x - 6 + Math.random() * 12,
+                y,
+                vx: -2.4 + Math.random() * 4.8,
+                vy: -4.8 - Math.random() * (2.5 * intensity),
+                life: 0.85 + Math.random() * 0.35,
+                color: i % 3 === 0 ? '#ffd08a' : i % 2 === 0 ? '#ff8c42' : '#ffb347',
+                size: 2 + Math.random() * 2.5,
+                drag: 0.95
+            });
+        }
+        for (let i = 0; i < 6; i++) {
+            particles.push({
+                x: x - 10 + Math.random() * 20,
+                y: y - 2 + Math.random() * 4,
+                vx: -1.2 + Math.random() * 2.4,
+                vy: -1.2 - Math.random() * 1.4,
+                life: 0.45 + Math.random() * 0.2,
+                color: 'rgba(255, 210, 140, 0.9)',
+                size: 4 + Math.random() * 4,
+                drag: 0.92
+            });
+        }
+    }
+
+    function spawnWallCrash(x, y) {
+        for (let i = 0; i < 16; i++) {
+            particles.push({
+                x: x - 6 + Math.random() * 12,
+                y: y - 6 + Math.random() * 12,
+                vx: -3.5 + Math.random() * 2.5,
+                vy: -2.2 + Math.random() * 4.4,
+                life: 0.55 + Math.random() * 0.25,
+                color: i % 2 === 0 ? '#5a2230' : '#2e101b',
+                size: 3 + Math.random() * 2,
+                drag: 0.93
+            });
+        }
+        for (let i = 0; i < 10; i++) {
+            particles.push({
+                x: x - 4 + Math.random() * 8,
+                y: y - 4 + Math.random() * 8,
+                vx: 1.2 + Math.random() * 3.5,
+                vy: -2.5 + Math.random() * 5,
+                life: 0.4 + Math.random() * 0.2,
+                color: 'rgba(255, 220, 200, 0.9)',
+                size: 2 + Math.random() * 2,
+                drag: 0.9
+            });
+        }
+    }
+
     function drawPowerupIndicator(ctx, type, x, y, time, alpha) {
         ctx.save();
         ctx.globalAlpha = alpha;
@@ -574,6 +800,85 @@
         ctx.strokeRect(x + 0.5, y + 0.5, 33, 33);
         if (type === 'potion') drawFirePotion(ctx, x + 1, y + 3, time);
         else drawGoldNugget(ctx, x + 5, y + 7, time);
+        ctx.restore();
+    }
+
+    function getPlayerHitboxAt(x, y) {
+        return { x: x + 8, y: y + 4, w: player.w - 16, h: player.h - 14 };
+    }
+
+    function drawTrajectoryOverlay(timestamp) {
+        if (!showTrajectory || state !== 'PLAYING') return;
+
+        const previewPoints = [];
+        const lavaCeiling = canvas.height - 40;
+        let simY = player.y;
+        let simVy = player.vy;
+        let collided = false;
+
+        for (let step = 0; step < 90; step++) {
+            if (isThrusting) simVy += player.thrust;
+            simVy += player.gravity;
+            simY += simVy;
+
+            if (simY < 0) {
+                simY = 0;
+                simVy = 0;
+            }
+
+            if (simY > lavaCeiling) {
+                simY = lavaCeiling;
+                if (fireResistTimeLeft <= 0) collided = true;
+                else if (simVy > 1.5) simVy = 1.5;
+            }
+
+            previewPoints.push({ x: player.x + step * SCROLL_SPEED, y: simY + player.h * 0.48 });
+
+            const hitbox = getPlayerHitboxAt(player.x, simY);
+            for (const entity of entities) {
+                if (!isWallEntity(entity)) continue;
+                const futureX = entity.x - (step + 1) * SCROLL_SPEED;
+                if (hitbox.x < futureX + entity.w && hitbox.x + hitbox.w > futureX && hitbox.y < entity.y + entity.h && hitbox.y + hitbox.h > entity.y) {
+                    if (powerupTimeLeft <= 0 && fireResistTimeLeft <= 0) collided = true;
+                    break;
+                }
+            }
+
+            if (collided) break;
+        }
+
+        if (previewPoints.length < 2) return;
+
+        ctx.save();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(255, 214, 102, 0.8)';
+        ctx.setLineDash([8, 6]);
+        ctx.lineDashOffset = -timestamp * 0.03;
+        ctx.beginPath();
+        ctx.moveTo(previewPoints[0].x, previewPoints[0].y);
+        for (let i = 1; i < previewPoints.length; i++) ctx.lineTo(previewPoints[i].x, previewPoints[i].y);
+        ctx.stroke();
+
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(255, 250, 220, 0.7)';
+        ctx.setLineDash([2, 8]);
+        ctx.lineDashOffset = -timestamp * 0.05;
+        ctx.stroke();
+
+        for (let i = 0; i < previewPoints.length; i += 6) {
+            const point = previewPoints[i];
+            const glow = 0.25 + Math.sin(timestamp * 0.01 + i) * 0.08;
+            ctx.fillStyle = `rgba(255, 240, 180, ${glow})`;
+            ctx.fillRect(point.x - 2, point.y - 2, 4, 4);
+        }
+
+        if (collided) {
+            const finalPoint = previewPoints[previewPoints.length - 1];
+            ctx.fillStyle = 'rgba(255, 120, 90, 0.85)';
+            ctx.beginPath();
+            ctx.arc(finalPoint.x, finalPoint.y, 7, 0, Math.PI * 2);
+            ctx.fill();
+        }
         ctx.restore();
     }
 
@@ -686,6 +991,60 @@
         drawEmerald(ctx, emeraldX, emeraldY, timestamp, 0.85 + Math.sin(progress * Math.PI) * 0.15);
     }
 
+    function drawLava(timestamp) {
+        const lavaTop = canvas.height - 20;
+        const waveA = Math.sin(timestamp * 0.004) * 2;
+        const waveB = Math.sin(timestamp * 0.007 + 1.4) * 2;
+        const lavaOffset = ((lavaScroll % 44) + 44) % 44;
+        const textureOffset = ((lavaScroll % 28) + 28) % 28;
+        const bubbleOffset = ((lavaScroll % 120) + 120) % 120;
+
+        ctx.fillStyle = '#b81f00';
+        ctx.fillRect(0, lavaTop - 8, canvas.width, 28);
+
+        const gradient = ctx.createLinearGradient(0, lavaTop - 6, 0, canvas.height);
+        gradient.addColorStop(0, '#ffb347');
+        gradient.addColorStop(0.28, '#ff6a1f');
+        gradient.addColorStop(0.75, '#d73300');
+        gradient.addColorStop(1, '#7c1200');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, lavaTop, canvas.width, 20);
+
+        ctx.fillStyle = 'rgba(255, 236, 160, 0.5)';
+        for (let x = -44 - lavaOffset; x < canvas.width + 44; x += 22) {
+            const crest = lavaTop + 2 + Math.sin(timestamp * 0.006 + x * 0.05) * 2 + (x % 44 === 0 ? waveA : waveB);
+            ctx.fillRect(x, crest, 16, 2);
+        }
+
+        ctx.fillStyle = 'rgba(90, 0, 0, 0.18)';
+        for (let x = -28 - textureOffset; x < canvas.width + 28; x += 28) {
+            const columnHeight = 6 + Math.sin(timestamp * 0.003 + x * 0.09) * 3;
+            ctx.fillRect(x, canvas.height - 8 - columnHeight, 18, 8 + columnHeight);
+        }
+
+        for (let i = 0; i < 10; i++) {
+            const seed = i * 47.3;
+            const bubbleX = ((seed * 13) - bubbleOffset + canvas.width + 120) % (canvas.width + 120) - 60;
+            const bob = Math.sin(timestamp * 0.004 + seed) * 5;
+            const rise = ((timestamp * (0.03 + i * 0.002)) + seed * 19) % 26;
+            const bubbleY = canvas.height - 5 - rise + bob * 0.2;
+            const size = 2 + (i % 3);
+            ctx.globalAlpha = 0.2 + ((Math.sin(timestamp * 0.01 + seed) + 1) * 0.15);
+            ctx.fillStyle = i % 2 === 0 ? '#ffd08a' : '#ff8c42';
+            ctx.beginPath();
+            ctx.arc(bubbleX, bubbleY, size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
+        const haze = ctx.createLinearGradient(0, lavaTop - 18, 0, lavaTop + 10);
+        haze.addColorStop(0, 'rgba(255, 140, 66, 0)');
+        haze.addColorStop(0.45, 'rgba(255, 140, 66, 0.18)');
+        haze.addColorStop(1, 'rgba(255, 240, 200, 0.08)');
+        ctx.fillStyle = haze;
+        ctx.fillRect(0, lavaTop - 18, canvas.width, 28);
+    }
+
     function gameLoop(timestamp) {
         const dt = Math.min((timestamp - (lastTime || timestamp)) / (1000 / BASE_FPS), 3);
         lastTime = timestamp;
@@ -709,10 +1068,11 @@
         }
 
         // --- LAVA ---
-        ctx.fillStyle = '#ff4500'; ctx.fillRect(0, canvas.height - 20, canvas.width, 20);
+        drawLava(timestamp);
 
         if (state === 'PLAYING') {
             spawnTimer += dt; scrapTimer += dt;
+            lavaScroll += SCROLL_SPEED * dt;
             if (powerupTimeLeft > 0) powerupTimeLeft -= (dt * 16.6);
             const hadFireResist = fireResistTimeLeft > 0;
             if (fireResistTimeLeft > 0) fireResistTimeLeft -= (dt * 16.6);
@@ -720,19 +1080,26 @@
             if (hadFireResist && fireResistTimeLeft <= 0) updateHUD();
             if (isThrusting) {
                 player.vy += player.thrust * dt;
+                playSound('thruster');
                 if (Math.random() < 0.2 * dt) particles.push({ x: player.x, y: player.y + 15, vx: -1-Math.random()*2, vy: (Math.random()-0.5)*3, life: 1, color: '#ff9900' });
             }
             player.vy += player.gravity * dt; player.y += player.vy * dt;
             if (Math.random() < 0.3 * dt) trail.push({ x: player.x + 5, y: player.y + 10, life: 1.0, size: 4 + Math.random() * 6 });
             if (player.y < 0) { player.y = 0; player.vy = 0; }
             const lavaCeiling = canvas.height - 40;
+            const isTouchingLava = player.y > lavaCeiling;
             if (player.y > lavaCeiling) {
-                if (fireResistTimeLeft <= 0) endGame();
+                if (fireResistTimeLeft <= 0) endGame('lava');
                 else {
+                    if (!wasTouchingLava) {
+                        spawnLavaSplash(player.x + 16, canvas.height - 20, Math.min(1.6, Math.abs(player.vy) / 3 + (isThrusting ? 0.3 : 0)));
+                        playSound('lava-splash');
+                    }
                     player.y = lavaCeiling;
                     if (player.vy > 1.5) player.vy = 1.5;
                 }
             }
+            wasTouchingLava = isTouchingLava;
 
             if (spawnTimer >= 85) {
                 spawnTimer = 0; const gap = 160, h = Math.random() * (canvas.height - gap - 100) + 50;
@@ -753,9 +1120,13 @@
                 }
             }
 
+        }
+
+        if (state === 'PLAYING' || state === 'DYING') {
             for (let i = entities.length - 1; i >= 0; i--) {
-                const e = entities[i]; e.x -= SCROLL_SPEED * dt;
-                if (e.type === 'wall' && !e.passed && player.x > e.x + e.w) {
+                const e = entities[i];
+                if (state === 'PLAYING') e.x -= SCROLL_SPEED * dt;
+                if (state === 'PLAYING' && e.type === 'wall' && !e.passed && player.x > e.x + e.w) {
                     e.passed = true; wallScore++;
                     if (wallScore >= nextVillagerAt) {
                         spawnVillager();
@@ -768,13 +1139,14 @@
                 else if (e.type === 'nugget') drawGoldNugget(ctx, e.x, e.y, timestamp);
                 else if (e.type === 'potion') drawFirePotion(ctx, e.x, e.y, timestamp);
                 else if (e.type === 'villager') drawVillager(ctx, e.x, e.y, timestamp);
-                const pB = { x: player.x + 5, y: player.y + 5, w: player.w - 10, h: player.h - 10 };
-                if (pB.x < e.x + e.w && pB.x + pB.w > e.x && pB.y < e.y + e.h && pB.y + pB.h > e.y) {
+                const pB = getPlayerHitboxAt(player.x, player.y);
+                if (state === 'PLAYING' && pB.x < e.x + e.w && pB.x + pB.w > e.x && pB.y < e.y + e.h && pB.y + pB.h > e.y) {
                     if (e.type === 'wall' || e.type === 'wall-bottom') { 
-                        if (powerupTimeLeft <= 0 && fireResistTimeLeft <= 0) endGame(); 
+                        if (powerupTimeLeft <= 0 && fireResistTimeLeft <= 0) endGame('wall'); 
                     }
                     else if (e.type === 'scrap') { 
                         scrapScore++; updateHUD(); 
+                        playSound('scrap');
                         for(let j=0; j<8; j++) particles.push({ x: e.x, y: e.y, vx: -2+Math.random()*4, vy: -2+Math.random()*4, life: 1, color: '#ffd700' }); 
                         entities.splice(i, 1); 
                     }
@@ -783,6 +1155,7 @@
                         if (fireResistTimeLeft > 0 && fireResistTimeLeft < POWERUP_DURATION) fireResistTimeLeft = POWERUP_DURATION;
                         triggerPickupFlash(220);
                         updateHUD();
+                        playSound('nugget');
                         spawnNuggetFirework(e.x + e.w / 2, e.y + e.h / 2);
                         entities.splice(i, 1); 
                     }
@@ -790,26 +1163,20 @@
                         fireResistTimeLeft = FIRE_RESIST_DURATION;
                         triggerPickupFlash(160);
                         updateHUD();
+                        playSound('potion');
                         spawnPotionBurst(e.x + e.w / 2, e.y + e.h / 2);
                         entities.splice(i, 1);
                     }
                     else if (e.type === 'villager') {
                         emeraldScore++;
                         updateHUD();
+                        playSound('emerald');
                         triggerVillagerReward();
                         entities.splice(i, 1);
                     }
                 }
                 if (e.x < -150) entities.splice(i, 1);
             }
-
-            for (let i = particles.length - 1; i >= 0; i--) {
-                const p = particles[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 0.04 * dt;
-                if (p.drag) { p.vx *= p.drag; p.vy *= p.drag; }
-                if (p.life <= 0) { particles.splice(i, 1); continue; }
-                ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size || 3, p.size || 3);
-            }
-            ctx.globalAlpha = 1;
         }
 
         if (state === 'REWARD') {
@@ -820,11 +1187,38 @@
             }
         }
 
+        if (state === 'DYING') {
+            deathTimer -= dt * 16.6;
+            if (deathTimer <= 0) finishDeath();
+        }
+
+        if (state === 'PLAYING' || state === 'DYING') {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 0.04 * dt;
+                if (p.drag) { p.vx *= p.drag; p.vy *= p.drag; }
+                if (p.life <= 0) { particles.splice(i, 1); continue; }
+                ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size || 3, p.size || 3);
+            }
+            ctx.globalAlpha = 1;
+        }
+
         // --- PLAYER (Bobbing in Menu) ---
         if (state !== 'DEAD') {
             ctx.save();
             const bob = (state === 'MENU') ? Math.sin(timestamp * 0.005) * 8 : 0;
             ctx.translate(player.x, player.y + bob);
+            if (state === 'DYING' && deathCause === 'wall') {
+                const crashProgress = 1 - Math.max(0, deathTimer) / 500;
+                const impact = Math.sin(crashProgress * Math.PI * 0.9);
+                const squashX = 1 + impact * 0.42;
+                const squashY = 1 - impact * 0.34;
+                ctx.translate(-8 - crashProgress * 6, crashProgress * 4);
+                ctx.scale(squashX, squashY);
+            } else if (state === 'DYING' && deathCause === 'lava') {
+                const burnProgress = 1 - Math.max(0, deathTimer) / 500;
+                ctx.translate(0, burnProgress * 4);
+                ctx.rotate(Math.sin(timestamp * 0.04) * 0.04);
+            }
             const isG = powerupTimeLeft > 0;
             const isF = fireResistTimeLeft > 0;
             const blinkTime = Math.max(powerupTimeLeft, fireResistTimeLeft);
@@ -833,6 +1227,8 @@
             drawPixelPlayer(ctx, 0, 0, selectedPlayer, timestamp, isG, isF, blnk);
             ctx.restore();
         }
+
+        drawTrajectoryOverlay(timestamp);
 
         if (state === 'PLAYING') {
             const topY = 15;
@@ -863,9 +1259,49 @@
         requestAnimationFrame(gameLoop);
     }
 
-    function endGame() {
+    function endGame(cause = 'wall') {
+        if (state === 'DYING' || state === 'DEAD') return;
+        state = 'DYING'; isThrusting = false;
+        deathCause = cause;
+        deathTimer = 500;
+        if (cause === 'lava') {
+            playSound('lava-hit');
+            spawnLavaSplash(player.x + 16, canvas.height - 20, 1.9);
+            for (let i = 0; i < 12; i++) {
+                particles.push({
+                    x: player.x + 10 + Math.random() * 14,
+                    y: player.y + 12 + Math.random() * 10,
+                    vx: -2 + Math.random() * 4,
+                    vy: -3.5 + Math.random() * 2.5,
+                    life: 0.8 + Math.random() * 0.25,
+                    color: i % 2 === 0 ? '#ff8c42' : '#ffd08a',
+                    size: 2 + Math.random() * 2,
+                    drag: 0.94
+                });
+            }
+        } else {
+            playSound('wall-hit');
+            spawnWallCrash(player.x + 16, player.y + 14);
+            for (let i = 0; i < 12; i++) {
+                const angle = (Math.PI * 2 * i) / 12;
+                particles.push({
+                    x: player.x + 16 + Math.cos(angle) * 4,
+                    y: player.y + 14 + Math.sin(angle) * 4,
+                    vx: Math.cos(angle) * (2.2 + Math.random() * 1.6),
+                    vy: Math.sin(angle) * (2.2 + Math.random() * 1.6),
+                    life: 0.35 + Math.random() * 0.12,
+                    color: 'rgba(255, 235, 220, 0.85)',
+                    size: 2 + Math.random() * 1.5,
+                    drag: 0.88
+                });
+            }
+            player.vy = Math.min(player.vy, 0.6);
+        }
+    }
+
+    function finishDeath() {
         if (state === 'DEAD') return;
-        state = 'DEAD'; isThrusting = false;
+        state = 'DEAD';
         deathScreen.classList.remove('hidden'); hud.style.display = 'none';
         finalEmeraldsText.innerText = "EMERALDS: " + emeraldScore;
         finalScrapsText.innerText = "SCRAPS: " + scrapScore; finalWallsText.innerText = "WALLS : " + wallScore;
