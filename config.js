@@ -5,7 +5,7 @@
  */
 window.GAME_CONFIG = {
     // Replace with your actual Firebase Realtime Database URL
-    firebaseURL: "YOUR_FIREBASE_URL_HERE",
+    firebaseURL: "https://ghastrider-default-rtdb.europe-west1.firebasedatabase.app/leaderboard",
     
     // Default players used if the database is empty or unreachable
     defaultPlayers: ["Theo", "Tadeu", "Luise", "Max"]
