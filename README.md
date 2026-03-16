@@ -1,88 +1,152 @@
-# GhastRider 🚀🔥
+# GhastRider
 
-A high-performance, 16-bit arcade flight simulator built with **Vanilla JavaScript** and **HTML5 Canvas**. Navigate through the treacherous Nether, collect ancient debris (scraps), and use shiny gold nuggets to phase through walls while competing on a dynamic global leaderboard.
+A fast, arcade-style survival flyer built with vanilla JavaScript and HTML5 Canvas. You pilot a hero riding a ghast through a Nether fortress, dodge walls, skim lava, chase high-value pickups, and compete on a Firebase-backed leaderboard.
 
 ![GhastRider Gameplay](ghastrider-gameplay-ss.png)
 
----
+## What It Is
 
-## 🎮 About the Game
-In **GhastRider**, the objective is simple but challenging: fly your hero and their happy Ghast friend through the treacherous Nether Fortress. 
+GhastRider is a single-page browser game with:
 
-- **Survival:** Avoid the deep purple fortress walls and the bubbling lava below.
-- **Scraps:** Collect dark "Netherite Scraps" to boost your score.
-- **Power-Ups:** Keep an eye out for the rare **Super Shiny Gold Nugget**. Collecting it grants **Wall Immunity for 5 seconds**. A visual blinking effect will warn you 2 seconds before the power-up expires.
-- **Dynamic Roster:** The game automatically fetches player names from your database and assigns them unique sprites based on the name found in the leaderboard.
+- real-time arcade movement tuned for desktop and mobile
+- pixel-art pickups and character variants
+- weighted leaderboard scoring stored in Firebase
+- procedural obstacle and collectible spawning
+- lightweight deployment to Firebase Hosting
 
----
+## Current Gameplay
 
-## 🛠️ Technical Highlights
-- **Delta-Time Scaling:** Movements are calculated based on frame timing, ensuring the game runs at the same speed on a 60Hz mobile screen as it does on a 144Hz desktop monitor.
-- **Smart Spawning:** Items are algorithmically placed to ensure they never spawn inside fortress brick hitboxes.
-- **Atmospheric Rendering:** Features a multi-layered parallax background with foreground "Sparkling Ash Rain" and motion-blurred smoke trails.
-- **Mobile Hardened:** Specifically designed to prevent accidental browser zooms, context menus, or text selection during intense tapping sessions.
+Your run is built around risk, score routing, and survival:
 
----
+- `Walls` are the base survival metric. Every fortress wall you clear adds `1` score weight.
+- `Scraps` are common collectibles worth `3` score weight each.
+- `Emeralds` are the premium reward, earned by finding villagers and completing the trade animation. Each emerald is worth `10` score weight.
+- `Gold Nuggets` grant temporary wall immunity for `5` seconds.
+- `Fire Resistance Potions` grant lava immunity and wall immunity for `7` seconds.
+- If a potion is active and you collect a nugget, the potion timer is lifted up to `5` seconds if it had dropped below that.
 
-## 🚀 Getting Started
+Villagers spawn occasionally after enough wall clears, appear in less predictable positions, and pause the game briefly for an emerald reward sequence before the run continues.
 
-### 1. Prerequisites
-This is a self-contained web app. You only need a modern web browser (Chrome, Safari, Firefox, Edge) to run it.
+## Scoring
 
-### 2. Firebase Realtime Database Setup
-The leaderboard and character selection system rely on a Firebase Realtime Database.
+The leaderboard score is calculated dynamically from stored stats:
 
-1. Create a project in the [Firebase Console](https://console.firebase.google.com/).
-2. Create a **Realtime Database**.
-3. Set your **Rules** to allow public reads/writes (or configure secure access as needed):
-   ```json
-   {
-     "rules": {
-       ".read": true,
-       ".write": true
-     }
-   }
-   ```
-4. **Initial Data Schema:** Import or manually add this JSON structure to your database to seed the initial players (**Theo, Tadeu, Luise, and Max**):
-   ```json
-   {
-     "leaderboard": {
-       "Theo": { "scraps": 0, "walls": 0 },
-       "Tadeu": { "scraps": 0, "walls": 0 },
-       "Luise": { "scraps": 0, "walls": 0 },
-       "Max": { "scraps": 0, "walls": 0 }
-     }
-   }
-   ```
+```text
+score = emeralds * 10 + scraps * 3 + walls * 1
+```
 
-### 3. Configuration
-Open the game HTML file and locate the `GAME_CONFIG` object at the top of the script:
+The database stores:
+
+- `emeralds`
+- `scraps`
+- `walls`
+
+The total score is derived in the game each time the leaderboard is rendered.
+
+## Visual Style
+
+The current build includes:
+
+- pixel-art rider and ghast sprites
+- powered-up gold and fire transformation states
+- animated pickup indicators in the top-right HUD
+- gold firework bursts and potion glass/spark bursts on pickup
+- ash particles, smoke trail effects, lava floor, and layered fortress atmosphere
+
+## Tech Notes
+
+The project is intentionally minimal:
+
+- `index.html`: game UI, styles, rendering, logic, and Firebase interaction
+- `config.js`: local runtime config for the Realtime Database URL and default players
+- `firebase.json`: Hosting config
+
+There is no bundler and no framework. The game runs directly in the browser from static files.
+
+## Running Locally
+
+You only need a browser.
+
+For a quick local run, open `index.html` directly or serve the folder with any static server.
+
+If you want a simple local server:
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open `http://localhost:8000`.
+
+## Firebase Setup
+
+The leaderboard uses Firebase Realtime Database, and the site can be deployed with Firebase Hosting.
+
+### Realtime Database
+
+Point `config.js` at your leaderboard path:
 
 ```javascript
-const GAME_CONFIG = {
-    // Replace with your actual Firebase URL
-    firebaseURL: "[https://your-project-id.firebaseio.com/leaderboard](https://your-project-id.firebaseio.com/leaderboard)",
+window.GAME_CONFIG = {
+    firebaseURL: "https://your-project-id-default-rtdb.region.firebasedatabase.app/leaderboard",
     defaultPlayers: ["Theo", "Tadeu", "Luise", "Max"]
 };
 ```
-Replace the `firebaseURL` string with your actual Firebase Realtime Database endpoint.
 
----
+Suggested starter data:
 
-## 🕹️ Controls
-- **Desktop:** Press **Space** or **Arrow Up** to fly. Press the same keys to restart after a mission fails.
-- **Mobile:** Tap and hold anywhere on the screen to fly.
+```json
+{
+  "leaderboard": {
+    "Theo": { "emeralds": 0, "scraps": 0, "walls": 0 },
+    "Tadeu": { "emeralds": 0, "scraps": 0, "walls": 0 },
+    "Luise": { "emeralds": 0, "scraps": 0, "walls": 0 },
+    "Max": { "emeralds": 0, "scraps": 0, "walls": 0 }
+  }
+}
+```
 
----
+Basic open rules for testing:
 
-## 🤖 AI Assistance
-This project was developed with significant AI collaboration:
-- **Gemini (Google):** Acted as the primary architect for the physics engine, character logic, Delta-Time scaling, and advanced atmospheric effects.
-- **ChatGPT (OpenAI):** Contributed to initial logic structures and UI refinements.
+```json
+{
+  "rules": {
+    ".read": true,
+    ".write": true
+  }
+}
+```
 
----
+### Hosting
 
-## 📝 License
-This project is open-source. Feel free to fork it, add new characters, or customize the Nether's atmosphere!
+This repo is already structured as a static Firebase Hosting app. The current `firebase.json` serves the project root directly.
 
-Created with Gemini by Tadeu
+Deploy with:
+
+```bash
+firebase deploy --only hosting
+```
+
+## Controls
+
+- `Desktop`: hold `Space` or `Arrow Up` to thrust
+- `Mobile`: tap and hold to thrust
+- `After death`: press `Space` or `Arrow Up` to restart
+
+## Why The Repo Is Simple
+
+This project favors immediacy over tooling:
+
+- easy to inspect
+- easy to tweak in one file
+- easy to deploy
+- easy to hand off
+
+That makes it a good fit for rapid mechanic iteration, visual experimentation, and small gameplay updates without a build pipeline.
+
+## Credits
+
+Created by Tadeu with significant AI-assisted iteration on gameplay, visuals, and deployment flow.
+
+## License
+
+Open source. Fork it, reskin it, or turn the Nether into something stranger.

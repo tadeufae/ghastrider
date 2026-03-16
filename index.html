@@ -79,9 +79,24 @@
             text-align: left; font-size: 7px; background: #000; padding: 10px;
             border: 2px solid #3d1a28; margin-top: 10px; line-height: 1.6;
         }
-        .leaderboard-row { display: flex; justify-content: space-between; margin-bottom: 4px; color: #aaa; }
+        .leaderboard-row {
+            display: grid;
+            grid-template-columns: 34px minmax(58px, 1fr) 26px 26px 26px 34px;
+            column-gap: 6px;
+            align-items: center;
+            margin-bottom: 4px;
+            color: #aaa;
+        }
         .leaderboard-row.header { color: #ff4d4d; border-bottom: 1px solid #333; padding-bottom: 4px; margin-bottom: 8px; }
         .leaderboard-row.highlight { color: #ffd700; }
+        .leaderboard-row span:nth-child(1),
+        .leaderboard-row span:nth-child(n + 3) { text-align: right; }
+        .leaderboard-row span:nth-child(2) {
+            text-align: left;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
 
         #hud {
             position: absolute; top: env(safe-area-inset-top, 15px); left: 15px;
@@ -89,6 +104,8 @@
             text-shadow: 2px 2px 0 #000; display: none;
             pointer-events: none; line-height: 1.8;
         }
+
+        .score-accent { color: #6ee7b7; }
 
         .hidden { display: none !important; }
         .loading-text { font-size: 10px; color: #ffd700; animation: pulse 1.5s infinite; }
@@ -100,6 +117,7 @@
 <div id="game-container">
     <div id="hud">
         PLAYER: <span id="hud-name">...</span><br>
+        EMERALDS: 0<br>
         SCRAPS: 0<br>
         WALLS : 0
     </div>
@@ -116,7 +134,7 @@
             </div>
             <h2>LEADERBOARD</h2>
             <div id="leaderboard-box" class="leaderboard">
-                <div class="leaderboard-row header"><span>RANK</span><span>NAME</span><span>SCRAPS</span><span>WALLS</span></div>
+                <div class="leaderboard-row header"><span>RANK</span><span>NAME</span><span>EMR</span><span>SCR</span><span>WAL</span><span>SCORE</span></div>
                 <div id="leaderboard-content">Loading...</div>
             </div>
         </div>
@@ -126,12 +144,14 @@
     <div id="death-screen" class="ui-panel hidden">
         <div class="box">
             <h1>MISSION FAILED</h1>
+            <p id="final-emeralds" style="color: #6ee7b7; margin: 10px 0; font-size: 10px;">EMERALDS: 0</p>
             <p id="final-scraps" style="color: #ffd700; margin: 10px 0; font-size: 10px;">SCRAPS: 0</p>
             <p id="final-walls" style="color: #ffffff; margin: 10px 0; font-size: 10px;">WALLS: 0</p>
+            <p id="final-total" style="color: #ffffff; margin: 10px 0; font-size: 10px;">SCORE: 0</p>
             <button class="btn tall" id="retry-btn">TRY AGAIN</button>
             <h2>LEADERBOARD</h2>
             <div class="leaderboard">
-                <div class="leaderboard-row header"><span>RANK</span><span>NAME</span><span>SCRAPS</span><span>WALLS</span></div>
+                <div class="leaderboard-row header"><span>RANK</span><span>NAME</span><span>EMR</span><span>SCR</span><span>WAL</span><span>SCORE</span></div>
                 <div id="leaderboard-content-death">Loading...</div>
             </div>
             <button class="btn secondary" id="switch-btn" style="margin-top: 20px;">SWITCH PLAYER</button>
@@ -156,8 +176,10 @@
           hudName = document.getElementById('hud-name'),
           menuScreen = document.getElementById('menu-screen'), 
           deathScreen = document.getElementById('death-screen'),
+          finalEmeraldsText = document.getElementById('final-emeralds'),
           finalScrapsText = document.getElementById('final-scraps'), 
           finalWallsText = document.getElementById('final-walls'),
+          finalTotalText = document.getElementById('final-total'),
           lbContent = document.getElementById('leaderboard-content'), 
           lbContentDeath = document.getElementById('leaderboard-content-death'),
           charGrid = document.getElementById('char-grid'), 
@@ -165,21 +187,28 @@
           selectionArea = document.getElementById('selection-area');
 
     // Engine variables
-    let lastTime = 0, spawnTimer = 0, scrapTimer = 0, powerupTimeLeft = 0;
-    let scrapSpawnsCounter = 0, nextNuggetAt = Math.floor(Math.random() * 6) + 5; 
+    let lastTime = 0, spawnTimer = 0, scrapTimer = 0, powerupTimeLeft = 0, fireResistTimeLeft = 0, pickupFlashTimeLeft = 0;
+    let collectibleSpawnsCounter = 0,
+        nextNuggetAt = Math.floor(Math.random() * 6) + 5,
+        nextPotionAt = (Math.floor(Math.random() * 6) + 5) * 2;
+    let nextVillagerAt = Math.floor(Math.random() * 8) + 12, rewardTimer = 0;
 
     // Game state
-    let state = 'MENU', scrapScore = 0, wallScore = 0, isThrusting = false;
+    let state = 'MENU', scrapScore = 0, wallScore = 0, emeraldScore = 0, isThrusting = false;
     let entities = [], particles = [], trail = [], bgLayers = [], ashParticles = [];
     let selectedPlayer = 'Theo', leaderboard = {};
 
-    const BASE_FPS = 60, SCROLL_SPEED = 4.5, POWERUP_DURATION = 5000;
+    const BASE_FPS = 60, SCROLL_SPEED = 4.5, POWERUP_DURATION = 5000, FIRE_RESIST_DURATION = 7000;
 
     const player = {
         x: 60, y: 0, w: 32, h: 32, vy: 0,
         gravity: 0.20, thrust: -0.48,
         reset() { this.y = canvas.height / 2; this.vy = 0; }
     };
+
+    function calculateTotalScore(scores) {
+        return (scores.emeralds || 0) * 10 + (scores.scraps || 0) * 3 + (scores.walls || 0);
+    }
 
     // --- DATA FETCHING ---
     async function fetchLeaderboard() {
@@ -213,7 +242,7 @@
             card.append(cv, label); charGrid.appendChild(card);
             const pctx = cv.getContext('2d');
             pctx.imageSmoothingEnabled = false;
-            drawPixelPlayer(pctx, 4, 15, name, 0, false, false);
+            drawPixelPlayer(pctx, 4, 15, name, 0, false, false, false);
             card.onclick = () => {
                 selectedPlayer = name;
                 document.querySelectorAll('.char-card').forEach(c => c.classList.remove('selected'));
@@ -228,9 +257,10 @@
     function renderLeaderboard() {
         const list = Object.keys(leaderboard).map(n => ({
             name: n,
+            emeralds: leaderboard[n].emeralds || 0,
             scraps: leaderboard[n].scraps || 0,
             walls: leaderboard[n].walls || 0,
-            total: (leaderboard[n].scraps || 0) + (leaderboard[n].walls || 0)
+            total: calculateTotalScore(leaderboard[n] || {})
         })).sort((a, b) => b.total - a.total);
 
         const html = list.map((item, i) => {
@@ -238,32 +268,38 @@
             const suffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th';
             return `<div class="leaderboard-row ${item.name === selectedPlayer ? 'highlight' : ''}">
                 <span>${rank}${suffix}</span><span>${item.name.toUpperCase()}</span>
-                <span>${item.scraps}</span><span>${item.walls}</span>
+                <span>${item.emeralds}</span><span>${item.scraps}</span><span>${item.walls}</span><span>${item.total}</span>
             </div>`;
         }).join('');
         lbContent.innerHTML = lbContentDeath.innerHTML = html || "No scores.";
     }
 
-    async function updatePlayer(name, scraps, walls) {
+    async function updatePlayer(name, emeralds, scraps, walls) {
         if (!GAME_CONFIG.firebaseURL) return;
-        const existing = leaderboard[name] || { scraps: 0, walls: 0 };
-        if (scraps + walls <= (existing.scraps || 0) + (existing.walls || 0)) return;
+        const existing = leaderboard[name] || { emeralds: 0, scraps: 0, walls: 0 };
+        if (calculateTotalScore({ emeralds, scraps, walls }) <= calculateTotalScore(existing)) return;
         try {
             await fetch(`${GAME_CONFIG.firebaseURL}/${name}.json`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ scraps, walls })
+                body: JSON.stringify({ emeralds, scraps, walls })
             });
             fetchLeaderboard(); 
         } catch(e) {}
     }
 
     // --- RENDER HELPERS ---
-    function drawPixelPlayer(ctx, x, y, name, time, isGold, blink) {
+    function drawPixelPlayer(ctx, x, y, name, time, isGold, isFire, blink) {
         if (blink && Math.floor(time / 60) % 2 === 0) return;
-        ctx.fillStyle = isGold ? '#ffd700' : '#ffdbac'; 
+        if (pickupFlashTimeLeft > 0) {
+            ctx.fillStyle = `rgba(255, 248, 220, ${Math.min(0.9, pickupFlashTimeLeft / 220)})`;
+            ctx.fillRect(x + 2, y - 14, 12, 18);
+        }
+        const glowFlicker = Math.abs(Math.sin(time * 0.02));
+        const skinTone = isFire ? '#ffb26b' : isGold ? '#ffe680' : '#ffdbac';
+        ctx.fillStyle = skinTone; 
         ctx.fillRect(x + 5, y - 10, 6, 6);
-        if (!isGold) {
+        if (!isGold && !isFire) {
             const low = name.toLowerCase();
             if (low === 'theo') {
                 ctx.fillStyle = '#4b3621'; ctx.fillRect(x + 4, y - 11, 8, 2); 
@@ -289,30 +325,66 @@
                 ctx.fillStyle = '#7c2d12'; ctx.fillRect(x + 5, y - 4, 6, 6);
             }
             ctx.fillStyle = '#e2a698'; ctx.fillRect(x + 7, y - 6, 2, 1);
+        } else if (isFire) {
+            ctx.fillStyle = '#ff8a1f'; ctx.fillRect(x + 5, y - 4, 6, 6);
+            ctx.fillStyle = '#ffd166'; ctx.fillRect(x + 6, y - 3, 4, 4);
+            ctx.fillStyle = '#ff5a1f'; ctx.fillRect(x + 4, y - 12, 2, 3); ctx.fillRect(x + 10, y - 13, 2, 4);
+            ctx.fillStyle = '#ffd9a3'; ctx.fillRect(x + 6, y - 13, 3, 2);
+            ctx.fillStyle = `rgba(255, 149, 0, ${0.25 + glowFlicker * 0.35})`;
+            ctx.fillRect(x + 3, y - 6, 10, 11);
         } else {
+            ctx.fillStyle = '#ffef8a'; ctx.fillRect(x + 5, y - 4, 6, 6);
             ctx.fillStyle = '#fff7cc'; ctx.fillRect(x + 6, y - 9, 2, 2); ctx.fillRect(x + 5, y - 2, 4, 4);
+            ctx.fillStyle = `rgba(255, 235, 120, ${0.25 + glowFlicker * 0.3})`;
+            ctx.fillRect(x + 4, y - 5, 8, 8);
         }
     }
 
-    function drawPixelGhast(ctx, x, y, time, isGold, blink) {
+    function drawPixelGhast(ctx, x, y, time, isGold, isFire, blink) {
         if (blink && Math.floor(time / 60) % 2 === 0) return;
-        ctx.fillStyle = isGold ? '#ffd700' : '#ffffff'; ctx.fillRect(x, y, 28, 20);
-        if (!isGold) {
+        if (pickupFlashTimeLeft > 0) {
+            ctx.fillStyle = `rgba(255, 248, 220, ${Math.min(0.75, pickupFlashTimeLeft / 260)})`;
+            ctx.fillRect(x - 3, y - 4, 34, 28);
+        }
+        const shimmer = Math.abs(Math.sin(time * 0.02));
+        ctx.fillStyle = isFire ? '#ffb15e' : isGold ? '#ffdd55' : '#ffffff'; ctx.fillRect(x, y, 28, 20);
+        if (!isGold && !isFire) {
             ctx.fillStyle = '#111'; ctx.fillRect(x + 16, y + 4, 3, 5); ctx.fillRect(x + 23, y + 4, 3, 5);
             ctx.fillStyle = '#ffbaba'; ctx.fillRect(x + 14, y + 10, 3, 2); ctx.fillRect(x + 25, y + 10, 3, 2);
             ctx.fillStyle = '#eeeeee';
-        } else { ctx.fillStyle = '#fff7cc'; ctx.fillRect(x + 18, y + 6, 4, 4); }
+        } else if (isFire) {
+            ctx.fillStyle = '#fff2c7'; ctx.fillRect(x + 18, y + 6, 4, 4);
+            ctx.fillStyle = `rgba(255, 128, 32, ${0.2 + shimmer * 0.35})`;
+            ctx.fillRect(x - 2, y - 2, 32, 24);
+        } else {
+            ctx.fillStyle = '#fff7cc'; ctx.fillRect(x + 18, y + 6, 4, 4);
+            ctx.fillStyle = `rgba(255, 240, 120, ${0.2 + shimmer * 0.3})`;
+            ctx.fillRect(x - 1, y - 1, 30, 22);
+        }
         for(let i=0; i<3; i++) {
             const wave = Math.sin(time * 0.01 + i) * 3;
+            ctx.fillStyle = isFire ? '#ff8a1f' : isGold ? '#ffe066' : '#eeeeee';
             ctx.fillRect(x + 3 + (i * 9), y + 20, 5, 6 + wave);
+        }
+        if (isFire) {
+            ctx.fillStyle = '#ff5a1f';
+            ctx.fillRect(x + 2, y - 3, 3, 4);
+            ctx.fillRect(x + 11, y - 5, 4, 6);
+            ctx.fillRect(x + 22, y - 4, 3, 5);
+            ctx.fillStyle = '#ffd166';
+            ctx.fillRect(x + 12, y - 3, 2, 3);
         }
     }
 
     // --- GAME ENGINE ---
     function nuclearReset() {
-        state = 'PLAYING'; scrapScore = 0; wallScore = 0; entities = []; particles = []; trail = [];
-        isThrusting = false; player.reset(); spawnTimer = 0; scrapTimer = 0; powerupTimeLeft = 0;
-        scrapSpawnsCounter = 0; nextNuggetAt = Math.floor(Math.random() * 6) + 5; 
+        state = 'PLAYING'; scrapScore = 0; wallScore = 0; emeraldScore = 0; entities = []; particles = []; trail = [];
+        isThrusting = false; player.reset(); spawnTimer = 0; scrapTimer = 0; powerupTimeLeft = 0; fireResistTimeLeft = 0; pickupFlashTimeLeft = 0;
+        collectibleSpawnsCounter = 0;
+        nextNuggetAt = Math.floor(Math.random() * 6) + 5;
+        nextPotionAt = (Math.floor(Math.random() * 6) + 5) * 2;
+        nextVillagerAt = Math.floor(Math.random() * 8) + 12;
+        rewardTimer = 0;
         bgLayers = []; generateBG(); generateAsh();
         menuScreen.classList.add('hidden'); deathScreen.classList.add('hidden');
         hud.style.display = 'block'; updateHUD();
@@ -336,7 +408,9 @@
         }
     }
 
-    function updateHUD() { hud.innerHTML = `PLAYER: ${selectedPlayer.toUpperCase()}<br>SCRAPS: ${scrapScore}<br>WALLS : ${wallScore}`; }
+    function updateHUD() {
+        hud.innerHTML = `PLAYER: ${selectedPlayer.toUpperCase()}<br>EMERALDS: ${emeraldScore}<br>SCRAPS: ${scrapScore}<br>WALLS : ${wallScore}`;
+    }
 
     document.getElementById('start-btn').onclick = nuclearReset;
     document.getElementById('retry-btn').onclick = nuclearReset;
@@ -349,6 +423,7 @@
     window.onkeydown = (e) => { 
         if(e.code === 'Space' || e.code === 'ArrowUp') { 
             if(state === 'PLAYING') act(true); 
+            else if (state === 'REWARD') { e.preventDefault(); }
             else { e.preventDefault(); nuclearReset(); } 
         } 
     };
@@ -372,9 +447,243 @@
     }
 
     function drawGoldNugget(ctx, x, y, time) {
-        const bounce = Math.sin(time * 0.01) * 8, shm = Math.abs(Math.sin(time * 0.02));
-        ctx.fillStyle = '#ffd700'; ctx.fillRect(x, y + bounce, 22, 18);
-        ctx.fillStyle = `rgba(255, 255, 200, ${shm})`; ctx.fillRect(x + 4, y + 4 + bounce, 10, 6);
+        const bounce = Math.sin(time * 0.01) * 8;
+        const shimmer = Math.abs(Math.sin(time * 0.025));
+        const fy = y + bounce;
+        ctx.fillStyle = `rgba(255, 234, 120, ${0.25 + shimmer * 0.35})`;
+        ctx.fillRect(x - 2, fy + 1, 26, 20);
+        ctx.fillStyle = '#b88300';
+        ctx.fillRect(x + 4, fy + 8, 14, 6);
+        ctx.fillStyle = '#ffd84d';
+        ctx.fillRect(x + 2, fy + 6, 18, 8);
+        ctx.fillRect(x + 5, fy + 3, 12, 4);
+        ctx.fillStyle = '#fff0a5';
+        ctx.fillRect(x + 7, fy + 4, 7, 2);
+        ctx.fillRect(x + 5, fy + 8, 4, 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.35 + shimmer * 0.45})`;
+        ctx.fillRect(x + 15, fy + 5, 2, 6);
+        ctx.fillRect(x + 18, fy + 2, 2, 2);
+    }
+
+    function drawFirePotion(ctx, x, y, time) {
+        const bounce = Math.sin(time * 0.01) * 8;
+        const shimmer = Math.abs(Math.sin(time * 0.02));
+        const fy = y + bounce;
+
+        ctx.fillStyle = '#6b3f1f';
+        ctx.fillRect(x + 10, fy + 1, 8, 5);
+        ctx.fillStyle = '#c98d52';
+        ctx.fillRect(x + 11, fy, 6, 3);
+
+        ctx.fillStyle = '#dbe8f3';
+        ctx.fillRect(x + 6, fy + 6, 16, 12);
+        ctx.fillRect(x + 4, fy + 10, 20, 10);
+        ctx.fillStyle = '#f3f8fc';
+        ctx.fillRect(x + 8, fy + 8, 12, 8);
+        ctx.fillRect(x + 7, fy + 12, 14, 5);
+
+        ctx.fillStyle = '#ff7a1a';
+        ctx.fillRect(x + 7, fy + 13, 14, 6);
+        ctx.fillRect(x + 8, fy + 19, 12, 1);
+        ctx.fillStyle = '#ffb347';
+        ctx.fillRect(x + 9, fy + 14, 5, 3);
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.35 + shimmer * 0.35})`;
+        ctx.fillRect(x + 10, fy + 9, 2, 6);
+    }
+
+    function drawVillager(ctx, x, y, time) {
+        const bounce = Math.sin(time * 0.01) * 6;
+        const fy = y + bounce;
+        ctx.fillStyle = '#7a4b2b'; ctx.fillRect(x + 9, fy + 2, 12, 4);
+        ctx.fillStyle = '#d6a77a'; ctx.fillRect(x + 10, fy + 6, 10, 10);
+        ctx.fillStyle = '#5b3a29'; ctx.fillRect(x + 12, fy + 9, 6, 3);
+        ctx.fillStyle = '#2d1b12'; ctx.fillRect(x + 11, fy + 8, 2, 2); ctx.fillRect(x + 17, fy + 8, 2, 2);
+        ctx.fillStyle = '#7c4a2f'; ctx.fillRect(x + 7, fy + 16, 16, 12);
+        ctx.fillStyle = '#52311d'; ctx.fillRect(x + 10, fy + 28, 4, 5); ctx.fillRect(x + 16, fy + 28, 4, 5);
+    }
+
+    function drawEmerald(ctx, x, y, time, alpha = 1) {
+        const shimmer = Math.abs(Math.sin(time * 0.02));
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = `rgba(110, 231, 183, ${0.25 + shimmer * 0.3})`;
+        ctx.fillRect(x - 2, y + 1, 18, 16);
+        ctx.fillStyle = '#047857';
+        ctx.fillRect(x + 2, y + 2, 10, 10);
+        ctx.fillStyle = '#34d399';
+        ctx.fillRect(x + 1, y + 3, 12, 8);
+        ctx.fillRect(x + 3, y + 1, 8, 3);
+        ctx.fillStyle = '#a7f3d0';
+        ctx.fillRect(x + 4, y + 4, 3, 3);
+        ctx.restore();
+    }
+
+    function triggerPickupFlash(duration = 180) {
+        pickupFlashTimeLeft = Math.max(pickupFlashTimeLeft, duration);
+    }
+
+    function spawnNuggetFirework(x, y) {
+        for (let i = 0; i < 26; i++) {
+            const angle = (Math.PI * 2 * i) / 26 + Math.random() * 0.16;
+            const speed = 1.8 + Math.random() * 3.8;
+            particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: 1.15,
+                color: i % 3 === 0 ? '#fff4b0' : i % 2 === 0 ? '#ffd84d' : '#fffbea',
+                size: 2 + Math.random() * 2,
+                drag: 0.97
+            });
+        }
+    }
+
+    function spawnPotionBurst(x, y) {
+        for (let i = 0; i < 16; i++) {
+            const angle = (Math.PI * 2 * i) / 16 + Math.random() * 0.22;
+            const speed = 1.4 + Math.random() * 2.8;
+            particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed - 0.2,
+                life: 1.05,
+                color: i % 2 === 0 ? '#ff8c42' : '#ffd3a1',
+                size: 2 + Math.random() * 1.5,
+                drag: 0.965
+            });
+        }
+        for (let i = 0; i < 10; i++) {
+            particles.push({
+                x, y,
+                vx: -2.2 + Math.random() * 4.4,
+                vy: -3.6 + Math.random() * 4,
+                life: 1.2,
+                color: '#dbe8f3',
+                size: 2 + Math.random() * 2,
+                drag: 0.955
+            });
+        }
+    }
+
+    function drawPowerupIndicator(ctx, type, x, y, time, alpha) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(10, 1, 1, 0.45)';
+        ctx.fillRect(x, y, 34, 34);
+        ctx.strokeStyle = type === 'potion' ? 'rgba(255, 138, 31, 0.45)' : 'rgba(255, 216, 77, 0.45)';
+        ctx.strokeRect(x + 0.5, y + 0.5, 33, 33);
+        if (type === 'potion') drawFirePotion(ctx, x + 1, y + 3, time);
+        else drawGoldNugget(ctx, x + 5, y + 7, time);
+        ctx.restore();
+    }
+
+    function isWallEntity(entity) {
+        return entity.type === 'wall' || entity.type === 'wall-bottom';
+    }
+
+    function collidesWithWallBox(x, y, w, h) {
+        return entities.some((entity) => {
+            if (!isWallEntity(entity)) return false;
+            return x < entity.x + entity.w && x + w > entity.x && y < entity.y + entity.h && y + h > entity.y;
+        });
+    }
+
+    function findCollectibleSpawnPosition(spawnX, width, height, floatAmplitude) {
+        const horizontalPadding = 12;
+        const verticalPadding = 14 + floatAmplitude;
+        const usableTop = 24 + floatAmplitude;
+        const usableBottom = canvas.height - 20 - height - verticalPadding;
+        if (usableBottom <= usableTop) return null;
+
+        const itemLeft = spawnX - horizontalPadding;
+        const itemWidth = width + horizontalPadding * 2;
+        const blockingWalls = entities
+            .filter((entity) => isWallEntity(entity) && itemLeft < entity.x + entity.w && itemLeft + itemWidth > entity.x)
+            .sort((a, b) => a.y - b.y);
+
+        let safeBands = [{ top: usableTop, bottom: usableBottom }];
+        for (const wall of blockingWalls) {
+            const blockTop = Math.max(usableTop, wall.y - verticalPadding);
+            const blockBottom = Math.min(usableBottom, wall.y + wall.h + verticalPadding);
+            if (blockBottom <= blockTop) continue;
+            const nextBands = [];
+            for (const band of safeBands) {
+                if (blockBottom <= band.top || blockTop >= band.bottom) {
+                    nextBands.push(band);
+                    continue;
+                }
+                if (blockTop > band.top) nextBands.push({ top: band.top, bottom: blockTop });
+                if (blockBottom < band.bottom) nextBands.push({ top: blockBottom, bottom: band.bottom });
+            }
+            safeBands = nextBands;
+            if (safeBands.length === 0) return null;
+        }
+
+        const viableBands = safeBands.filter((band) => band.bottom - band.top >= height);
+        if (viableBands.length === 0) return null;
+
+        const band = viableBands[Math.floor(Math.random() * viableBands.length)];
+        const spawnY = band.top + Math.random() * (band.bottom - band.top - height);
+        if (!collidesWithWallBox(spawnX, spawnY - floatAmplitude, width, height + floatAmplitude * 2)) {
+            return { x: spawnX, y: spawnY };
+        }
+        return null;
+    }
+
+    function spawnCollectible(type, width, height, floatAmplitude) {
+        const spawnX = canvas.width + 20;
+        const spawnPos = findCollectibleSpawnPosition(spawnX, width, height, floatAmplitude);
+        if (spawnPos) entities.push({ x: spawnPos.x, y: spawnPos.y, w: width, h: height, type });
+    }
+
+    function spawnVillager() {
+        if (entities.some((entity) => entity.type === 'villager')) return;
+        for (let attempt = 0; attempt < 14; attempt++) {
+            const spawnX = canvas.width * (0.55 + Math.random() * 0.4);
+            const spawnPos = findCollectibleSpawnPosition(spawnX, 28, 33, 6);
+            if (spawnPos) {
+                entities.push({ x: spawnPos.x, y: spawnPos.y, w: 28, h: 33, type: 'villager' });
+                return;
+            }
+        }
+        spawnCollectible('villager', 28, 33, 6);
+    }
+
+    function triggerVillagerReward() {
+        state = 'REWARD';
+        rewardTimer = 110;
+        isThrusting = false;
+    }
+
+    function drawRewardScene(timestamp) {
+        const progress = Math.min(1, 1 - rewardTimer / 110);
+        const panelW = Math.min(300, canvas.width - 40);
+        const panelH = 132;
+        const panelX = (canvas.width - panelW) / 2;
+        const panelY = (canvas.height - panelH) / 2;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#140604';
+        ctx.fillRect(panelX, panelY, panelW, panelH);
+        ctx.strokeStyle = '#2f8f6b';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(panelX + 1.5, panelY + 1.5, panelW - 3, panelH - 3);
+
+        ctx.fillStyle = '#6ee7b7';
+        ctx.font = "10px 'Press Start 2P'";
+        ctx.fillText('VILLAGER TRADE!', panelX + 20, panelY + 24);
+        ctx.fillStyle = '#ffd700';
+        ctx.font = "8px 'Press Start 2P'";
+        ctx.fillText('+1 EMERALD', panelX + 20, panelY + 46);
+
+        drawVillager(ctx, panelX + 28, panelY + 56, timestamp);
+        drawPixelGhast(ctx, panelX + panelW - 92, panelY + 68, timestamp, powerupTimeLeft > 0, fireResistTimeLeft > 0, false);
+        drawPixelPlayer(ctx, panelX + panelW - 92, panelY + 68, selectedPlayer, timestamp, powerupTimeLeft > 0, fireResistTimeLeft > 0, false);
+
+        const emeraldX = panelX + 78 + (panelW - 168) * progress;
+        const emeraldY = panelY + 72 - Math.sin(progress * Math.PI) * 18;
+        drawEmerald(ctx, emeraldX, emeraldY, timestamp, 0.85 + Math.sin(progress * Math.PI) * 0.15);
     }
 
     function gameLoop(timestamp) {
@@ -403,7 +712,12 @@
         ctx.fillStyle = '#ff4500'; ctx.fillRect(0, canvas.height - 20, canvas.width, 20);
 
         if (state === 'PLAYING') {
-            spawnTimer += dt; scrapTimer += dt; if (powerupTimeLeft > 0) powerupTimeLeft -= (dt * 16.6);
+            spawnTimer += dt; scrapTimer += dt;
+            if (powerupTimeLeft > 0) powerupTimeLeft -= (dt * 16.6);
+            const hadFireResist = fireResistTimeLeft > 0;
+            if (fireResistTimeLeft > 0) fireResistTimeLeft -= (dt * 16.6);
+            if (pickupFlashTimeLeft > 0) pickupFlashTimeLeft -= (dt * 16.6);
+            if (hadFireResist && fireResistTimeLeft <= 0) updateHUD();
             if (isThrusting) {
                 player.vy += player.thrust * dt;
                 if (Math.random() < 0.2 * dt) particles.push({ x: player.x, y: player.y + 15, vx: -1-Math.random()*2, vy: (Math.random()-0.5)*3, life: 1, color: '#ff9900' });
@@ -411,7 +725,14 @@
             player.vy += player.gravity * dt; player.y += player.vy * dt;
             if (Math.random() < 0.3 * dt) trail.push({ x: player.x + 5, y: player.y + 10, life: 1.0, size: 4 + Math.random() * 6 });
             if (player.y < 0) { player.y = 0; player.vy = 0; }
-            if (player.y > canvas.height - 40) endGame();
+            const lavaCeiling = canvas.height - 40;
+            if (player.y > lavaCeiling) {
+                if (fireResistTimeLeft <= 0) endGame();
+                else {
+                    player.y = lavaCeiling;
+                    if (player.vy > 1.5) player.vy = 1.5;
+                }
+            }
 
             if (spawnTimer >= 85) {
                 spawnTimer = 0; const gap = 160, h = Math.random() * (canvas.height - gap - 100) + 50;
@@ -419,33 +740,38 @@
             }
 
             if (scrapTimer >= 60) {
-                scrapTimer = 0; scrapSpawnsCounter++;
-                const sx = canvas.width + 20; let sy = 0, safe = false, att = 0;
-                while(!safe && att < 15) {
-                    sy = Math.random() * (canvas.height - 120) + 60; safe = true;
-                    for(let e of entities) if((e.type === 'wall' || e.type === 'wall-bottom') && sx < e.x + e.w + 5 && sx + 25 > e.x && sy < e.y + e.h + 5 && sy + 25 > e.y) { safe = false; break; }
-                    att++;
-                }
-                if (safe) {
-                    if (scrapSpawnsCounter >= nextNuggetAt) { 
-                        scrapSpawnsCounter = 0; nextNuggetAt = Math.floor(Math.random() * 6) + 5; 
-                        entities.push({ x: sx, y: sy, w: 22, h: 18, type: 'nugget' }); 
-                    } else { 
-                        entities.push({ x: sx, y: sy, w: 20, h: 20, type: 'scrap' }); 
-                    }
+                scrapTimer = 0;
+                collectibleSpawnsCounter++;
+                if (collectibleSpawnsCounter >= nextPotionAt) {
+                    nextPotionAt += (Math.floor(Math.random() * 6) + 5) * 2;
+                    spawnCollectible('potion', 28, 22, 8);
+                } else if (collectibleSpawnsCounter >= nextNuggetAt) {
+                    nextNuggetAt += Math.floor(Math.random() * 6) + 5;
+                    spawnCollectible('nugget', 22, 18, 8);
+                } else {
+                    spawnCollectible('scrap', 20, 20, 6);
                 }
             }
 
             for (let i = entities.length - 1; i >= 0; i--) {
                 const e = entities[i]; e.x -= SCROLL_SPEED * dt;
-                if (e.type === 'wall' && !e.passed && player.x > e.x + e.w) { e.passed = true; wallScore++; updateHUD(); }
+                if (e.type === 'wall' && !e.passed && player.x > e.x + e.w) {
+                    e.passed = true; wallScore++;
+                    if (wallScore >= nextVillagerAt) {
+                        spawnVillager();
+                        nextVillagerAt += Math.floor(Math.random() * 8) + 12;
+                    }
+                    updateHUD();
+                }
                 if (e.type === 'wall' || e.type === 'wall-bottom') drawNetherWall(ctx, e.x, e.y, e.w, e.h);
                 else if (e.type === 'scrap') drawNetherScrap(ctx, e.x, e.y + Math.sin(timestamp * 0.005) * 6, e.w, e.h);
                 else if (e.type === 'nugget') drawGoldNugget(ctx, e.x, e.y, timestamp);
+                else if (e.type === 'potion') drawFirePotion(ctx, e.x, e.y, timestamp);
+                else if (e.type === 'villager') drawVillager(ctx, e.x, e.y, timestamp);
                 const pB = { x: player.x + 5, y: player.y + 5, w: player.w - 10, h: player.h - 10 };
                 if (pB.x < e.x + e.w && pB.x + pB.w > e.x && pB.y < e.y + e.h && pB.y + pB.h > e.y) {
                     if (e.type === 'wall' || e.type === 'wall-bottom') { 
-                        if (powerupTimeLeft <= 0) endGame(); 
+                        if (powerupTimeLeft <= 0 && fireResistTimeLeft <= 0) endGame(); 
                     }
                     else if (e.type === 'scrap') { 
                         scrapScore++; updateHUD(); 
@@ -454,8 +780,24 @@
                     }
                     else if (e.type === 'nugget') { 
                         powerupTimeLeft = POWERUP_DURATION; 
-                        for(let j=0; j<15; j++) particles.push({ x: e.x, y: e.y, vx: -3+Math.random()*6, vy: -3+Math.random()*6, life: 1, color: '#ffffff' }); 
+                        if (fireResistTimeLeft > 0 && fireResistTimeLeft < POWERUP_DURATION) fireResistTimeLeft = POWERUP_DURATION;
+                        triggerPickupFlash(220);
+                        updateHUD();
+                        spawnNuggetFirework(e.x + e.w / 2, e.y + e.h / 2);
                         entities.splice(i, 1); 
+                    }
+                    else if (e.type === 'potion') {
+                        fireResistTimeLeft = FIRE_RESIST_DURATION;
+                        triggerPickupFlash(160);
+                        updateHUD();
+                        spawnPotionBurst(e.x + e.w / 2, e.y + e.h / 2);
+                        entities.splice(i, 1);
+                    }
+                    else if (e.type === 'villager') {
+                        emeraldScore++;
+                        updateHUD();
+                        triggerVillagerReward();
+                        entities.splice(i, 1);
                     }
                 }
                 if (e.x < -150) entities.splice(i, 1);
@@ -463,10 +805,19 @@
 
             for (let i = particles.length - 1; i >= 0; i--) {
                 const p = particles[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 0.04 * dt;
+                if (p.drag) { p.vx *= p.drag; p.vy *= p.drag; }
                 if (p.life <= 0) { particles.splice(i, 1); continue; }
-                ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 3, 3);
+                ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size || 3, p.size || 3);
             }
             ctx.globalAlpha = 1;
+        }
+
+        if (state === 'REWARD') {
+            rewardTimer -= dt;
+            if (rewardTimer <= 0) {
+                state = 'PLAYING';
+                rewardTimer = 0;
+            }
         }
 
         // --- PLAYER (Bobbing in Menu) ---
@@ -474,11 +825,30 @@
             ctx.save();
             const bob = (state === 'MENU') ? Math.sin(timestamp * 0.005) * 8 : 0;
             ctx.translate(player.x, player.y + bob);
-            const isG = powerupTimeLeft > 0, blnk = powerupTimeLeft > 0 && powerupTimeLeft < 2000;
-            drawPixelGhast(ctx, 0, 0, timestamp, isG, blnk); 
-            drawPixelPlayer(ctx, 0, 0, selectedPlayer, timestamp, isG, blnk);
+            const isG = powerupTimeLeft > 0;
+            const isF = fireResistTimeLeft > 0;
+            const blinkTime = Math.max(powerupTimeLeft, fireResistTimeLeft);
+            const blnk = blinkTime > 0 && blinkTime < 2000;
+            drawPixelGhast(ctx, 0, 0, timestamp, isG, isF, blnk); 
+            drawPixelPlayer(ctx, 0, 0, selectedPlayer, timestamp, isG, isF, blnk);
             ctx.restore();
         }
+
+        if (state === 'PLAYING') {
+            const topY = 15;
+            let iconOffset = 0;
+            if (powerupTimeLeft > 0) {
+                const alpha = powerupTimeLeft < 2000 ? 0.35 + Math.abs(Math.sin(timestamp * 0.02)) * 0.45 : 0.65;
+                drawPowerupIndicator(ctx, 'gold', canvas.width - 49, topY + iconOffset, timestamp, alpha);
+                iconOffset += 40;
+            }
+            if (fireResistTimeLeft > 0) {
+                const alpha = fireResistTimeLeft < 2000 ? 0.35 + Math.abs(Math.sin(timestamp * 0.02)) * 0.45 : 0.65;
+                drawPowerupIndicator(ctx, 'potion', canvas.width - 49, topY + iconOffset, timestamp, alpha);
+            }
+        }
+
+        if (state === 'REWARD') drawRewardScene(timestamp);
 
         // --- FOREGROUND SPARKS (Fastest Parallax) ---
         ashParticles.forEach(p => {
@@ -497,8 +867,10 @@
         if (state === 'DEAD') return;
         state = 'DEAD'; isThrusting = false;
         deathScreen.classList.remove('hidden'); hud.style.display = 'none';
+        finalEmeraldsText.innerText = "EMERALDS: " + emeraldScore;
         finalScrapsText.innerText = "SCRAPS: " + scrapScore; finalWallsText.innerText = "WALLS : " + wallScore;
-        updatePlayer(selectedPlayer, scrapScore, wallScore);
+        finalTotalText.innerText = "SCORE : " + calculateTotalScore({ emeralds: emeraldScore, scraps: scrapScore, walls: wallScore });
+        updatePlayer(selectedPlayer, emeraldScore, scrapScore, wallScore);
     }
 
     function resize() { 
