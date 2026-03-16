@@ -5,7 +5,7 @@ A high-performance, 16-bit arcade flight simulator built with **Vanilla JavaScri
 ---
 
 ## 📸 Preview
-![GhastRider Gameplay](ghastrider-gameplay-ss.png)
+![GhastRider Gameplay](ghastRiderGameplay.png)
 
 ---
 
